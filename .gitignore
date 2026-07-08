@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Environments — .env.example is the only committed env file
+.env
+.env.*
+!.env.example
+
+# Local workflow state produced by /citizen-app (not shared)
+.plan/state.json

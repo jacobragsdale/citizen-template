@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv:*)",
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(docker build:*)",
+      "Bash(ruff:*)",
+      "Read",
+      "Write",
+      "Edit"
+    ]
+  }
+}

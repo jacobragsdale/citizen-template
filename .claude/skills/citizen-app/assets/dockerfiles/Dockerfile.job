@@ -1,0 +1,16 @@
+# Scheduled-job image. Built locally now; pushed to ACR later by the deploy step
+# and run as a Kubernetes CronJob (schedule recorded in PLAN.md).
+# Base is the official uv image; for ACR you can mirror/retag it unchanged.
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS base
+
+WORKDIR /app
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY . .
+RUN uv sync --frozen --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
+# Runs once to completion, then exits — that is what a CronJob expects.
+CMD ["python", "-m", "app.job"]

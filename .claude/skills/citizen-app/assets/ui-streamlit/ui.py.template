@@ -1,0 +1,23 @@
+"""Streamlit UI for the app.
+
+Run locally:  uv run --env-file .env streamlit run src/app/ui.py
+The build stage replaces the placeholders and the body with the real app.
+"""
+
+import os
+
+import streamlit as st
+
+st.set_page_config(page_title="APP_TITLE", layout="centered")
+st.title("APP_TITLE")
+st.write("APP_DESCRIPTION")
+
+# --- App body -------------------------------------------------------------
+# The build stage replaces everything below with the citizen's actual inputs,
+# actions, and outputs. This starter proves the UI boots and reads config.
+example_setting = os.environ.get("EXAMPLE_SETTING", "not set")
+st.caption(f"EXAMPLE_SETTING is currently: {example_setting}")
+
+name = st.text_input("Your name")
+if st.button("Say hello"):
+    st.success(f"Hello, {name or 'world'}!")
