@@ -23,6 +23,10 @@ You can stop any time and rerun `/citizen-app` — it picks up where you left of
 - **A scheduled job** — code that runs automatically on a schedule (e.g. a
   nightly report), packaged as a Kubernetes CronJob.
 
+Your app comes with **ready-made data built in** — no setup. Today you can point
+it at **Stocks** or **Bonds**; the assistant shows you what's available and wires
+it in for you.
+
 ## For maintainers
 
 This is a GitHub **template repository**. Each new app is created from it with

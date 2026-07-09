@@ -2,22 +2,27 @@
 
 Run locally:  uv run --env-file .env streamlit run src/app/ui.py
 The build stage replaces the placeholders and the body with the real app.
+Data comes from the preconfigured sources in app.data (see AGENTS.md).
 """
-
-import os
 
 import streamlit as st
 
-st.set_page_config(page_title="APP_TITLE", layout="centered")
+from app.data import get_source, list_sources
+
+st.set_page_config(page_title="APP_TITLE", layout="wide")
 st.title("APP_TITLE")
 st.write("APP_DESCRIPTION")
 
-# --- App body -------------------------------------------------------------
-# The build stage replaces everything below with the citizen's actual inputs,
-# actions, and outputs. This starter proves the UI boots and reads config.
-example_setting = os.environ.get("EXAMPLE_SETTING", "not set")
-st.caption(f"EXAMPLE_SETTING is currently: {example_setting}")
+# --- Pick a data source ---------------------------------------------------
+# The build stage narrows this to the source(s) the citizen chose (and may drop
+# the picker entirely if there is only one).
+labels = {s.label: s.key for s in list_sources()}
+choice = st.selectbox("Data source", list(labels))
+source = get_source(labels[choice])
+rows = source.fetch()
 
-name = st.text_input("Your name")
-if st.button("Say hello"):
-    st.success(f"Hello, {name or 'world'}!")
+# --- Show it --------------------------------------------------------------
+# The build stage replaces this with the real inputs, actions, and outputs.
+st.caption(source.description)
+st.metric("Records", len(rows))
+st.dataframe(rows, use_container_width=True)

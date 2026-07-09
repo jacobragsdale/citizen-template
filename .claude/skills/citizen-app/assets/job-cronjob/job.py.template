@@ -5,19 +5,27 @@ Dry run:   uv run python -m app.job --dry-run   (used by validation; must exit 0
 
 The build stage replaces the body of run() with the real work. Keep --dry-run
 working: it must exercise setup/wiring without doing anything irreversible.
+Data comes from the preconfigured sources in app.data (see AGENTS.md).
 """
 
 import argparse
-import os
+
+from app.data import get_source
+
+# The build stage sets this to the source the citizen chose ("stocks"|"bonds").
+SOURCE_KEY = "stocks"
 
 
 def run(*, dry_run: bool = False) -> None:
-    example_setting = os.environ.get("EXAMPLE_SETTING", "not set")
+    source = get_source(SOURCE_KEY)
+    rows = source.fetch()
     if dry_run:
-        print(f"dry-run OK — wiring is fine (EXAMPLE_SETTING={example_setting})")
+        print(f"dry-run OK — '{source.key}' returned {len(rows)} rows")
         return
-    # The build stage replaces this line with the job's real work.
-    print("job ran")
+    # The build stage replaces this with the job's real work over `rows`.
+    print(f"{source.label}: {len(rows)} records")
+    for row in rows[:5]:
+        print(row)
 
 
 def main() -> None:

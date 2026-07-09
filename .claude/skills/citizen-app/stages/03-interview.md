@@ -10,6 +10,9 @@ Shared:
 - [ ] **Goal** — one sentence: what does this app do, for whom?
 - [ ] **Inputs** — what does it need to work? (typed values, a file, an API key,
       a database, a spreadsheet?)
+- [ ] **Data source** — the app comes with ready-made data built in. List what's
+      available and let them pick one or more (see "Present the data catalog"
+      below). Record their choice(s).
 - [ ] **Outputs** — what does it produce or show? (a number, a chart, a file, an
       email, a message somewhere?)
 - [ ] **Secrets/config** — any passwords, API keys, or URLs? (These become
@@ -28,6 +31,19 @@ If `app_type == "job"`:
       expression (e.g. "every morning at 7" → `0 7 * * *`) and read it back.
 - [ ] **Run target** — where does the output go when it runs unattended?
 
+## Present the data catalog
+
+The template ships preconfigured data sources — no setup needed. Don't guess
+what's available; list it live:
+
+```bash
+uv run python -c "from app.data import list_sources; [print(f'- {s.label} ({s.key}): {s.description}') for s in list_sources()]"
+```
+
+Read the list to the citizen in plain language ("Your app can use this ready-made
+data: …") and ask which one(s) they want. Today that's **Stocks** and **Bonds**.
+Capture the chosen keys for `requirements.data_sources` (e.g. `["stocks"]`).
+
 ## Write the plan
 
 When every box is ticked, write `.plan/PLAN.md` using this exact structure:
@@ -43,6 +59,9 @@ When every box is ticked, write `.plan/PLAN.md` using this exact structure:
 
 ## Inputs
 - ...
+
+## Data source(s)
+- <Stocks | Bonds> — why this app uses it
 
 ## Outputs
 - ...
@@ -60,7 +79,7 @@ When every box is ticked, write `.plan/PLAN.md` using this exact structure:
 Record the essentials in state (so later stages don't re-ask):
 
 ```bash
-uv run .claude/skills/citizen-app/scripts/state.py set requirements '{"goal": "...", "schedule": "0 7 * * *", "env": ["NAME"]}'
+uv run .claude/skills/citizen-app/scripts/state.py set requirements '{"goal": "...", "data_sources": ["stocks"], "schedule": "0 7 * * *", "env": ["NAME"]}'
 uv run .claude/skills/citizen-app/scripts/state.py advance
 ```
 

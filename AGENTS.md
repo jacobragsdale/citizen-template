@@ -16,6 +16,29 @@ tracks the repo slug.
   `os.environ` only. Run with `uv run --env-file .env ...`.
 - Tests in `tests/`, run with `uv run pytest`.
 
+## Data access
+
+Data is **preconfigured** in `src/app/data/` — no connection setup. Apps read
+data ONLY through this interface, so mock and real sources are interchangeable:
+
+```python
+from app.data import get_source, list_sources
+
+for s in list_sources():          # catalog for a picker/menu
+    print(s.key, s.label, s.description)
+
+rows = get_source("stocks").fetch()   # list[dict] rows; keys == source.fields
+```
+
+Preconfigured sources today: **`stocks`** and **`bonds`** (static mock data in
+`stocks.py` / `bonds.py`). Each implements the `DataSource` protocol in
+`base.py`: `key`, `label`, `description`, `fields`, `fetch() -> list[Row]`.
+
+**To go from mock to real data:** replace one source's `fetch()` body with a
+real query/HTTP call and keep `key`, `label`, `fields`, and the return shape
+(a list of flat dict rows) the same. No app code changes. Add a new source by
+dropping a class next to `stocks.py` and registering it in `data/__init__.py`.
+
 ## The workflow
 
 This repo is driven by the `/citizen-app` skill in `.claude/skills/citizen-app/`.

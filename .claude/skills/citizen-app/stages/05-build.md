@@ -31,20 +31,29 @@ template so you are never staring at a blank file.
    ```
    Run command is `uv run --env-file .env python -m app.job`.
 
-3. Implement the plan by editing the copied file:
+3. Wire in the data source(s) from `requirements.data_sources` — the data is
+   preconfigured, so just point at it (never invent a connection or hardcode
+   rows):
+   - **UI:** if the plan uses one source, set it directly
+     (`source = get_source("stocks")`) and drop the `st.selectbox`; keep the
+     picker only if the citizen wanted to switch between several.
+   - **Job:** set `SOURCE_KEY = "stocks"` (or `"bonds"`) to their choice.
+   - Access rows only via `from app.data import get_source` / `list_sources`.
+
+4. Implement the plan by editing the copied file:
    - Replace the `APP_TITLE` / `APP_DESCRIPTION` placeholders (UI) with real text.
    - Replace the starter body with the real inputs, work, and outputs from
-     `.plan/PLAN.md`.
+     `.plan/PLAN.md`, operating on the rows from the data source.
    - Read every secret/config value from `os.environ` and add each one to
      `.env.example` with a comment. Never hardcode secrets.
    - Add any new dependency with `uv add <pkg>` — never edit pyproject deps by
      hand, never `pip install`.
 
-4. Write at least one real `pytest` test in `tests/` that checks a piece of the
+5. Write at least one real `pytest` test in `tests/` that checks a piece of the
    plan's logic (not just that it imports). Keep testable logic in plain
    functions so it can be tested without a running server.
 
-5. Update the README "Running" table with the run command above, and (for jobs)
+6. Update the README "Running" table with the run command above, and (for jobs)
    note the schedule from the plan.
 
 ## State written
