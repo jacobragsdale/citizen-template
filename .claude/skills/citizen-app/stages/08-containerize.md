@@ -1,4 +1,4 @@
-# Stage 07 — containerize (build gate)
+# Stage 08 — containerize (build gate)
 
 Goal: package the app into a container image and prove it builds. (Pushing to
 ACR and deploying to Kubernetes happen later — not here.)
@@ -19,7 +19,10 @@ ACR and deploying to Kubernetes happen later — not here.)
    printf '.git\n.venv\n__pycache__/\n.plan/\n.env\n.env.*\n!.env.example\n' > .dockerignore
    ```
 
-2. Build the image locally to prove it works:
+2. **First, tell the citizen this takes a while:** "I'm now packaging your app —
+   this usually takes several minutes. Feel free to step away; I'll keep working
+   and let you know the moment it's ready." Then build the image locally to prove
+   it works (this is the slow step):
    ```bash
    docker build -t "$(basename "$PWD"):local" .
    ```

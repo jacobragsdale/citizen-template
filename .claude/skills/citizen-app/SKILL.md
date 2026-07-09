@@ -31,6 +31,10 @@ advance. If `advance` prints `BLOCKED`, stay in the stage and resolve the gate.
 - Never show raw errors or stack traces. Translate failures into "here's what
   went wrong and what I'm doing about it."
 - Never ask them to run a command. You run everything.
+- Warn before slow steps. Before anything that takes more than ~a minute
+  (installing packages, packaging the app into a container), tell them plainly:
+  "This part takes a few minutes — feel free to step away, I'll keep working and
+  let you know when it's done." Then start it; don't wait for a reply.
 
 ## Start / resume
 
@@ -58,8 +62,9 @@ up at the saved stage.
    | `plan-review` | `stages/04-plan-review.md` | show the plan; **gate:** they must approve |
    | `build` | `stages/05-build.md` | build the app from the matching template |
    | `validate` | `stages/06-validate.md` | run checks + a smoke run; **gate:** must pass |
-   | `containerize` | `stages/07-containerize.md` | write the Dockerfile; **gate:** image builds |
-   | `ship` | `stages/08-ship.md` | publish to GitHub; **gate:** a PR URL exists |
+   | `preview` | `stages/07-preview.md` | run the app so the citizen can see it; **gate:** they approve |
+   | `containerize` | `stages/08-containerize.md` | write the Dockerfile; **gate:** image builds |
+   | `ship` | `stages/09-ship.md` | publish to GitHub; **gate:** a PR URL exists |
    | `done` | — | tell them the app is live and hand them the PR link |
 
 3. When the playbook's work is complete, run `state.py advance`. If it prints

@@ -1,4 +1,4 @@
-# Stage 08 — ship (publish gate)
+# Stage 09 — ship (publish gate)
 
 Goal: publish the finished app to GitHub as a pull request. This is the finish
 line — the workflow is not done until a PR exists.

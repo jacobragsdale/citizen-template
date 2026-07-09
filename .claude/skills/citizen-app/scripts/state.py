@@ -36,6 +36,7 @@ STAGES = [
     "plan-review",
     "build",
     "validate",
+    "preview",
     "containerize",
     "ship",
     "done",
@@ -44,6 +45,7 @@ STAGES = [
 GATES: dict[str, tuple[str, object, str]] = {
     "plan-review": ("plan_approved", True, "the user has not approved PLAN.md yet"),
     "validate": ("validation.passed", True, "validation has not passed yet"),
+    "preview": ("previewed", True, "the user has not viewed the app yet"),
     "containerize": ("image_built", True, "the container image has not built locally yet"),
     "ship": ("pr_url", "__set__", "no pull request URL recorded — the app is not published yet"),
 }
@@ -56,6 +58,7 @@ INITIAL = {
     "requirements": {},
     "plan_approved": False,
     "validation": {"passed": False, "last_run": None},
+    "previewed": False,
     "image_built": False,
     "pr_url": None,
 }
