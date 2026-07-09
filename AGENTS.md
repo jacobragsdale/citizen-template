@@ -39,6 +39,12 @@ real query/HTTP call and keep `key`, `label`, `fields`, and the return shape
 (a list of flat dict rows) the same. No app code changes. Add a new source by
 dropping a class next to `stocks.py` and registering it in `data/__init__.py`.
 
+**Presenting a source (reusable view helpers):**
+- Jobs: `from app.data.summary import summarize` — a plain-text count + per-field
+  min/max/avg. Stdlib only.
+- UI: `from app.present import show_source` — one call renders metrics + table +
+  bar chart. Ships in UI apps only (needs streamlit + pandas, added at build).
+
 ## The workflow
 
 This repo is driven by the `/citizen-app` skill in `.claude/skills/citizen-app/`.

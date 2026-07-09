@@ -21,9 +21,11 @@ template so you are never staring at a blank file.
    **UI:**
    ```bash
    cp .claude/skills/citizen-app/assets/ui-streamlit/ui.py.template src/app/ui.py
-   uv add streamlit
+   cp .claude/skills/citizen-app/assets/ui-streamlit/present.py.template src/app/present.py
+   uv add streamlit pandas
    ```
    Run command is `uv run --env-file .env streamlit run src/app/ui.py`.
+   `app.present.show_source(source)` renders metrics + table + chart in one call.
 
    **Job:**
    ```bash
