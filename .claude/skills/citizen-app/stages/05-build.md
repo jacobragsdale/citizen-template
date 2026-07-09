@@ -33,14 +33,27 @@ template so you are never staring at a blank file.
    ```
    Run command is `uv run --env-file .env python -m app.job`.
 
+   Then create the local env file the run/preview commands load (both `--env-file
+   .env`). It stays out of git, and starting from `.env.example` means the command
+   works even for a no-secrets app:
+   ```bash
+   cp .env.example .env
+   ```
+
 3. Wire in the data source(s) from `requirements.data_sources` — the data is
    preconfigured, so just point at it (never invent a connection or hardcode
    rows):
    - **UI:** if the plan uses one source, set it directly
      (`source = get_source("stocks")`) and drop the `st.selectbox`; keep the
      picker only if the citizen wanted to switch between several.
-   - **Job:** set `SOURCE_KEY = "stocks"` (or `"bonds"`) to their choice.
+   - **Job:** set `SOURCE_KEY = "stocks"` (or `"bonds"`) to their choice. If the
+     plan uses several sources, use `SOURCE_KEYS = ["stocks", "bonds"]` and loop.
    - Access rows only via `from app.data import get_source` / `list_sources`.
+   - **Rows are typed `object`.** Any arithmetic on a field (`float(row["price"])`,
+     comparisons, `abs(...)`) will fail the basedpyright gate. Read numbers with
+     the helper: `from app.data import as_float` → `as_float(row, "price")`. For
+     pandas aggregations that mis-infer (e.g. `groupby(...).mean()`), narrow with
+     `float(series.to_numpy(dtype=float).mean())` rather than a bare `float(...)`.
 
 4. Implement the plan by editing the copied file:
    - Replace the `APP_TITLE` / `APP_DESCRIPTION` placeholders (UI) with real text.

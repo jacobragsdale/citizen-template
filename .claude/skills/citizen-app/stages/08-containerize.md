@@ -16,8 +16,10 @@ ACR and deploying to Kubernetes happen later — not here.)
    cp .claude/skills/citizen-app/assets/dockerfiles/Dockerfile.job Dockerfile
    ```
    ```bash
-   printf '.git\n.venv\n__pycache__/\n.plan/\n.env\n.env.*\n!.env.example\n' > .dockerignore
+   printf '.git\n.venv\n__pycache__/\n.ruff_cache/\n.pytest_cache/\n.claude/\n.plan/\n.env\n.env.*\n!.env.example\n' > .dockerignore
    ```
+   (`.claude/` is the build-time skill tooling — it has no place in the runtime
+   image.)
 
 2. **First, tell the citizen this takes a while:** "I'm now packaging your app —
    this usually takes several minutes. Feel free to step away; I'll keep working

@@ -31,8 +31,9 @@ def run(*, dry_run: bool = False) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the scheduled job.")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="exercise wiring without doing real work")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="exercise wiring without doing real work"
+    )
     args = parser.parse_args()
     run(dry_run=args.dry_run)
 

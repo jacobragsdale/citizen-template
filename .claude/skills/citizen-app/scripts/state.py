@@ -109,6 +109,10 @@ def cmd_stage(_: argparse.Namespace) -> int:
 
 
 def cmd_show(_: argparse.Namespace) -> int:
+    if not STATE_PATH.exists():
+        # A brand-new run: not an error, it just means scaffold hasn't run yet.
+        print("no .plan/state.json — brand-new run; start at the scaffold stage")
+        return 0
     state = load()
     print(json.dumps(state, indent=2))
     i = STAGES.index(state["stage"])

@@ -22,7 +22,9 @@ def show_source(source: DataSource) -> None:
     if numeric:
         columns = st.columns(min(len(numeric), 4))
         for column, field in zip(columns, numeric[:4], strict=False):
-            column.metric(field, round(float(frame[field].mean()), 2))
+            # .to_numpy(dtype=float) gives basedpyright a concrete float to narrow
+            # from; frame[field].mean() alone is typed Series|Any and fails the gate.
+            column.metric(field, round(float(frame[field].to_numpy(dtype=float).mean()), 2))
 
     st.dataframe(frame, use_container_width=True)
 

@@ -11,11 +11,11 @@ Ready to use out of the box — no connection setup. Currently two mock sources:
     rows = get_source("stocks").fetch()   # the records
 """
 
-from app.data.base import DataSource, Row
+from app.data.base import DataSource, Row, as_float
 from app.data.bonds import bonds
 from app.data.stocks import stocks
 
-__all__ = ["DataSource", "Row", "get_source", "list_sources"]
+__all__ = ["DataSource", "Row", "as_float", "get_source", "list_sources"]
 
 _SOURCES: dict[str, DataSource] = {stocks.key: stocks, bonds.key: bonds}
 

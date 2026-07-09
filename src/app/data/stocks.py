@@ -11,7 +11,10 @@ from app.data.base import Row
 class StocksSource:
     key = "stocks"
     label = "Stocks"
-    description = "A daily snapshot of well-known company shares: price, sector, and day change."
+    description = (
+        "A daily snapshot of well-known company shares: symbol, name, sector, "
+        "price, day change (change_pct), and trading volume."
+    )
     fields = ["symbol", "name", "sector", "price", "change_pct", "volume"]
 
     def fetch(self) -> list[Row]:

@@ -23,3 +23,18 @@ class DataSource(Protocol):
     def fetch(self) -> list[Row]:
         """Return the current records. Mock sources return baked data."""
         ...
+
+
+def as_float(row: Row, key: str) -> float:
+    """Read a numeric field from a row as a float.
+
+    Row values are typed `object` (a row can hold strings or numbers), so plain
+    `float(row["price"])` fails the basedpyright gate. Use this to narrow safely:
+
+        from app.data import as_float
+        total = sum(as_float(r, "price") for r in rows)
+    """
+    value = row[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"row field {key!r} is not numeric: {value!r}")
+    return float(value)

@@ -10,7 +10,9 @@ This is a gate — do not ship until they've looked and are happy.
    ```bash
    uv run --env-file .env streamlit run src/app/ui.py --server.address 127.0.0.1 --server.port 8501
    ```
-   Run this in the background so you can keep talking to them.
+   Run this in the background so you can keep talking to them. If port 8501 is
+   already in use, pick another free port and use it in both the command and the
+   link below.
 2. Give them the link in plain language: "Your app is running — open
    **http://localhost:8501** in your browser to try it out." Wait for them.
 3. Ask what they think:
@@ -29,10 +31,13 @@ This is a gate — do not ship until they've looked and are happy.
 
 Jobs have no screen, so show them what it produces instead:
 
-1. Run it once and show the output:
+1. Run it in **dry-run** mode, which exercises the real wiring and prints what it
+   would do without firing any side effect (sending a message, writing a file):
    ```bash
-   uv run --env-file .env python -m app.job
+   uv run --env-file .env python -m app.job --dry-run
    ```
+   Only do a real run (drop `--dry-run`) if the citizen explicitly asks to see a
+   live one and understands it will actually act (e.g. post to their chat).
 2. Explain the output plainly and ask if it's what they expected. Handle changes
    vs. happy exactly as in the UI case (loop back to build, or approve).
 3. Record and advance:
