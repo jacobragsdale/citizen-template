@@ -53,6 +53,8 @@ not described as live until those systems confirm deployment.
 
 See [CORPORATE_INTEGRATION.md](CORPORATE_INTEGRATION.md) for the
 network-only work required to connect the template to your organization.
+The next developer implementing the repo-owned Dockerfile and build descriptor
+should start with the focused [CI/CD artifact handoff](CICD_HANDOFF.md).
 
 ## For maintainers
 

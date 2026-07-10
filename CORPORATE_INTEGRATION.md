@@ -94,6 +94,10 @@ Requirements:
 Decide whether generated repositories contain a small `Jenkinsfile` or are
 discovered and configured entirely by an approved shared library.
 
+Use [`CICD_HANDOFF.md`](CICD_HANDOFF.md) as the focused implementation brief
+and fill-in worksheet for the repo-owned Dockerfile and build descriptor. Keep
+this checklist as the source of truth for the wider delivery integration.
+
 - [ ] Add only the minimum repo-owned pipeline entry point required by the
       internal standard.
 - [ ] Reproduce the local gates: frozen dependency sync, ruff, basedpyright,
@@ -117,6 +121,10 @@ discovered and configured entirely by an approved shared library.
 
 The current Dockerfiles intentionally use the public uv base as a local
 placeholder.
+
+The target template/value split, internal facts to collect, and acceptance tests
+for replacing that placeholder are defined in
+[`CICD_HANDOFF.md`](CICD_HANDOFF.md).
 
 - [ ] Replace it with the approved internal image and immutable digest.
 - [ ] Apply the required runtime UID/GID, filesystem, capability, seccomp, and

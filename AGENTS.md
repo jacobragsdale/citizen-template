@@ -33,6 +33,7 @@ installed elsewhere, and do not document a replacement until it has been run.
 - The generated plan artifact contains approved requirements and is committed with apps.
 - The generated state artifact is local, git-ignored, and changed only by the workflow CLI.
 - `CORPORATE_INTEGRATION.md` — source of truth for network-only delivery integration.
+- `CICD_HANDOFF.md` — focused developer brief for the Dockerfile/build-descriptor contract.
 
 ## Conventions
 
