@@ -14,7 +14,7 @@ def numeric_fields(rows: list[Row]) -> list[str]:
     return [
         key
         for key, value in rows[0].items()
-        if isinstance(value, (int, float)) and not isinstance(value, bool)
+        if isinstance(value, int | float) and not isinstance(value, bool)
     ]
 
 
@@ -26,7 +26,7 @@ def summarize(source: DataSource) -> str:
         values: list[float] = []
         for row in rows:
             value = row[field]
-            if isinstance(value, (int, float)):
+            if isinstance(value, int | float):
                 values.append(float(value))
         if values:
             avg = sum(values) / len(values)

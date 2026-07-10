@@ -1,0 +1,7 @@
+interface:
+  display_name: "Citizen App"
+  short_description: "Build a previewed app and corporate-ready PR"
+  default_prompt: "Use $citizen-app to turn my idea into a locally previewed, tested, container-ready pull request."
+
+policy:
+  allow_implicit_invocation: true

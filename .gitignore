@@ -5,11 +5,16 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 
 # Environments — .env.example is the only committed env file
 .env
 .env.*
 !.env.example
 
-# Local workflow state produced by /citizen-app (not shared)
+# Local workflow evidence (the approved PLAN.md remains tracked)
 .plan/state.json
+.plan/preview/
+.plan/validation/
+.plan/PR_BODY.md

@@ -1,0 +1,8 @@
+"""Pure application logic for the automated-job starter."""
+
+from app.data import DataSource
+from app.data.summary import summarize
+
+
+def build_output(source: DataSource) -> str:
+    return summarize(source)

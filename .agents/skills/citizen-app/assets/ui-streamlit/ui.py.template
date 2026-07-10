@@ -1,0 +1,19 @@
+"""Thin Streamlit entry point; keep calculations and decisions in app.core.
+
+Run locally: uv run streamlit run src/app/ui.py
+If a local environment file exists: uv run --env-file .env streamlit run src/app/ui.py
+"""
+
+import streamlit as st
+
+from app.core import selected_source
+from app.data import list_sources
+from app.present import show_source
+
+st.set_page_config(page_title="APP_TITLE", layout="wide")
+st.title("APP_TITLE")
+st.write("APP_DESCRIPTION")
+
+labels = {source.label: source.key for source in list_sources()}
+choice = st.selectbox("Data source", list(labels))
+show_source(selected_source(labels[choice]))

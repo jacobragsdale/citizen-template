@@ -1,0 +1,8 @@
+"""Pure application logic for the dashboard starter."""
+
+from app.data import DataSource, get_source
+
+
+def selected_source(key: str) -> DataSource:
+    """Resolve the chosen stable data-source key."""
+    return get_source(key)

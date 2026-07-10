@@ -1,0 +1,15 @@
+# Automated-job image for local handoff verification. The internal pipeline
+# will replace the public base, then scan, push, and configure the schedule.
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS base
+
+WORKDIR /app
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY . .
+RUN uv sync --frozen --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
+# Runs once to completion; internal scheduling is deliberately configured later.
+CMD ["python", "-m", "app.job"]

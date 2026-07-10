@@ -1,0 +1,12 @@
+.git
+.agents/
+.venv
+__pycache__/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.plan/
+.env
+.env.*
+!.env.example

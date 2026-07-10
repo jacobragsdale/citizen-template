@@ -1,0 +1,42 @@
+"""Thin automated-job entry point; keep decisions in app.core.
+
+Run once: uv run python -m app.job
+Dry run: uv run python -m app.job --dry-run
+"""
+
+import argparse
+
+from app.core import build_output
+from app.data import get_source
+
+SOURCE_KEYS = ["stocks"]
+
+
+def deliver(result: str) -> None:
+    """Replace with the real output boundary; this starter writes to stdout."""
+    print(result)
+
+
+def run(*, dry_run: bool = False) -> None:
+    for key in SOURCE_KEYS:
+        source = get_source(key)
+        result = build_output(source)
+        if dry_run:
+            print(f"DRY RUN — would deliver from {source.label}:\n{result}")
+        else:
+            deliver(result)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the automated job once.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="exercise configuration and transformations without irreversible delivery",
+    )
+    args = parser.parse_args()
+    run(dry_run=args.dry_run)
+
+
+if __name__ == "__main__":
+    main()

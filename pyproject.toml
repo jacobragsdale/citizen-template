@@ -15,7 +15,13 @@ build-backend = "hatchling.build"
 packages = ["src/app"]
 
 [dependency-groups]
-dev = ["ruff", "basedpyright", "pre-commit", "pytest"]
+dev = [
+    "ruff",
+    "basedpyright",
+    "pre-commit",
+    "pytest",
+    "pytest-cov>=7.1.0",
+]
 
 [tool.ruff]
 target-version = "py311"
@@ -28,7 +34,14 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 # Basic mode: catches real bugs without burying a new app in strictness noise.
 typeCheckingMode = "basic"
 pythonVersion = "3.11"
-include = ["src", "tests"]
+include = ["src", "tests", ".agents/skills/citizen-app/scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["src", ".agents/skills/citizen-app/scripts"]
+
+[tool.coverage.report]
+show_missing = true

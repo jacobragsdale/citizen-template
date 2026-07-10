@@ -35,6 +35,6 @@ def as_float(row: Row, key: str) -> float:
         total = sum(as_float(r, "price") for r in rows)
     """
     value = row[key]
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, int | float):
         raise TypeError(f"row field {key!r} is not numeric: {value!r}")
     return float(value)

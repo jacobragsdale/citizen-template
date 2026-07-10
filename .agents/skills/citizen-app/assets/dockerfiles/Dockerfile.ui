@@ -1,0 +1,20 @@
+# Dashboard image for local handoff verification. The internal pipeline will
+# replace the public base with an approved mirror, then scan, push, and deploy.
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS base
+
+WORKDIR /app
+# Compile to bytecode for faster cold starts; copy (not link) so the layer is
+# self-contained inside the image.
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+
+# Install dependencies first (cached unless pyproject/uv.lock change), then code.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY . .
+RUN uv sync --frozen --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
+# Streamlit's default port; internal ingress details are not configured here.
+EXPOSE 8501
+CMD ["streamlit", "run", "src/app/ui.py", \
+     "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
