@@ -35,7 +35,9 @@ def test_legacy_agent_paths_are_absent() -> None:
     offenders = [
         str(path.relative_to(ROOT))
         for path in relevant_text_files()
-        if any(legacy in path.read_text(errors="ignore") for legacy in legacy_paths)
+        if any(
+            legacy in path.read_text(encoding="utf-8", errors="ignore") for legacy in legacy_paths
+        )
     ]
 
     assert not (ROOT / legacy_paths[0]).exists()
@@ -61,7 +63,14 @@ def test_citizen_handoff_never_calls_the_pull_request_live() -> None:
     offenders = [
         str(path.relative_to(ROOT))
         for path in citizen_docs
-        if any(phrase in path.read_text().lower() for phrase in forbidden)
+        if any(phrase in path.read_text(encoding="utf-8").lower() for phrase in forbidden)
     ]
 
     assert offenders == []
+
+
+def test_staged_offline_validation_checks_lock_without_mutating_it() -> None:
+    validate = (SKILL_DIR / "scripts/validate.py").read_text(encoding="utf-8")
+
+    assert 'os.environ.get("UV_NO_SYNC") == "1"' in validate
+    assert '["uv", "lock", "--check"]' in validate

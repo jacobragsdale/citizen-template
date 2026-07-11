@@ -55,6 +55,23 @@ See [CORPORATE_INTEGRATION.md](CORPORATE_INTEGRATION.md) for the
 network-only work required to connect the template to your organization.
 The next developer implementing the repo-owned Dockerfile and build descriptor
 should start with the focused [CI/CD artifact handoff](CICD_HANDOFF.md).
+The broader workflow roadmap is in the
+[citizen template improvement plan](CITIZEN_TEMPLATE_IMPROVEMENT_PLAN.md).
+Maintainers planning repeatable standard-user Windows rehearsals should use the
+[Windows no-admin test harness plan](WINDOWS_TEST_HARNESS_PLAN.md).
+
+Prepare or run the disposable Windows harness from the Mac controller with:
+
+```bash
+uv run python tools/windows-harness/harness.py prepare --output /tmp/citizen-payload
+uv run python tools/windows-harness/harness.py run \
+  --run-id job-001 --scenario job-happy --memory 8G
+```
+
+The default 8 GB profile is the release lane. Pass `--memory 4G` only for an
+intentional constrained-memory rehearsal. Dashboard runs may use
+`--keep-running` for controller-owned browser review; clean them up afterward
+through the registered home-server VM adapter.
 
 ## For maintainers
 

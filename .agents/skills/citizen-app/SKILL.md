@@ -77,8 +77,10 @@ boundary or implementing an internal provider.
 
 - `scripts/state.py` — **run** for state transitions, approvals, evidence, and rewinds.
 - `scripts/preflight.py` — **run** before repository creation; it fails early on missing tools.
+- `scripts/build.py` — **run** for current lint, type, compile, and application-test evidence.
 - `scripts/preview.py` — **run** to execute the page or job and write preview evidence.
 - `scripts/validate.py` — **run** for the complete local quality gate.
+- `scripts/container.py` — **run** to build and execute the type-specific container smoke check.
 - `stages/*.md` — **read** only for the current stage.
 - `assets/` — copy starters from here; replace their instructional placeholders during build.
 

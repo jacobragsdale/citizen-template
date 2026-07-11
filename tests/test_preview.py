@@ -21,12 +21,13 @@ def load_preview() -> ModuleType:
 def test_job_preview_executes_dry_run_and_writes_evidence(tmp_path: Path) -> None:
     package = tmp_path / "app"
     package.mkdir()
-    (package / "__init__.py").write_text("")
+    (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "job.py").write_text(
         "if __name__ == '__main__':\n"
         "    import sys\n"
         "    assert '--dry-run' in sys.argv\n"
-        "    print('DRY RUN — report prepared')\n"
+        "    print('DRY RUN — report prepared')\n",
+        encoding="utf-8",
     )
     output_dir = tmp_path / ".plan/preview"
 
@@ -46,7 +47,9 @@ def test_job_preview_executes_dry_run_and_writes_evidence(tmp_path: Path) -> Non
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (output_dir / "job-output.txt").read_text() == "DRY RUN — report prepared\n"
+    assert (output_dir / "job-output.txt").read_text(
+        encoding="utf-8"
+    ) == "DRY RUN — report prepared\n"
 
 
 def test_ui_preview_executes_page_and_rejects_render_exceptions() -> None:
@@ -57,3 +60,24 @@ def test_ui_preview_executes_page_and_rejects_render_exceptions() -> None:
     assert "AppTest.from_file" in app_test_program
     assert "if app.exception" in app_test_program
     assert "DASHBOARD RENDERED" in app_test_program
+    assert "number inputs" in app_test_program
+    assert "multiselects" in app_test_program
+    assert "metrics" in app_test_program
+
+
+def test_successful_preview_keeps_stderr_out_of_approval_evidence(tmp_path: Path) -> None:
+    preview = load_preview()
+    evidence = tmp_path / "job-output.txt"
+
+    passed = preview.run_and_write(
+        [
+            sys.executable,
+            "-c",
+            "import sys; print('approved output'); print('diagnostic', file=sys.stderr)",
+        ],
+        evidence,
+    )
+
+    assert passed is True
+    assert evidence.read_text(encoding="utf-8") == "approved output\n"
+    assert evidence.with_suffix(".stderr.txt").read_text(encoding="utf-8") == "diagnostic\n"

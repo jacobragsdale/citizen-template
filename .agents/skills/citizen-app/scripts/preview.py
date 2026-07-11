@@ -30,8 +30,13 @@ print("DASHBOARD RENDERED")
 print(f"titles: {len(app.title)}")
 print(f"buttons: {len(app.button)}")
 print(f"text inputs: {len(app.text_input)}")
+print(f"number inputs: {len(app.number_input)}")
 print(f"select boxes: {len(app.selectbox)}")
+print(f"multiselects: {len(app.multiselect)}")
+print(f"metrics: {len(app.metric)}")
 print(f"dataframes: {len(app.dataframe)}")
+print(f"warnings: {len(app.warning)}")
+print(f"errors: {len(app.error)}")
 """
 
 
@@ -45,7 +50,7 @@ def resolve_type(explicit: str | None) -> str:
     if explicit:
         return explicit
     if STATE_PATH.is_file():
-        raw = json.loads(STATE_PATH.read_text())
+        raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
         app_type = raw.get("app_type")
         if app_type in {"ui", "job"}:
             return str(app_type)
@@ -70,9 +75,12 @@ def run_and_write(command: list[str], output: Path) -> bool:
     )
     text = result.stdout
     if result.stderr:
-        text += ("\n" if text else "") + result.stderr
+        diagnostics = output.with_suffix(".stderr.txt")
+        diagnostics.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics.write_text(result.stderr.strip() + "\n", encoding="utf-8")
+        print(result.stderr.strip(), file=sys.stderr)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(text.strip() + "\n")
+    output.write_text(text.strip() + "\n", encoding="utf-8")
     print(text.strip())
     print(f"\nEvidence: {output}")
     return result.returncode == 0 and bool(text.strip())

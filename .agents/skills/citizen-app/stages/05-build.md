@@ -67,10 +67,12 @@ Replace the generated app README sections with:
 - job schedule/timezone/manual-run details when applicable; and
 - “Delivery status: ready for internal pipeline after PR approval.”
 
-Record the current build only after the entry point, core, and real behavior
-tests exist and instructional placeholders are gone:
+Run the build helper only after the entry point, core, and real behavior tests
+exist and instructional placeholders are gone. It records current lint,
+formatting, type, compile, and application-specific test evidence; failing or
+stale evidence cannot advance:
 
 ```bash
-uv run .agents/skills/citizen-app/scripts/state.py record-build
+uv run .agents/skills/citizen-app/scripts/build.py
 uv run .agents/skills/citizen-app/scripts/state.py advance
 ```

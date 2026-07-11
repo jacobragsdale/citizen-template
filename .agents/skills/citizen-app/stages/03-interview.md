@@ -96,7 +96,10 @@ Record a compact machine-readable copy. Include the goal and the complete
 acceptance-criteria list; include schedule, timezone, and environment-variable
 names when relevant.
 
+Write the structured requirements to `.plan/requirements.json` as UTF-8, then
+record them without shell-sensitive JSON quoting:
+
 ```bash
-uv run .agents/skills/citizen-app/scripts/state.py set requirements '{"goal":"...","acceptance_criteria":["..."],"data_sources":["stocks"],"env":[]}'
+uv run .agents/skills/citizen-app/scripts/state.py set requirements --value-file .plan/requirements.json
 uv run .agents/skills/citizen-app/scripts/state.py advance
 ```

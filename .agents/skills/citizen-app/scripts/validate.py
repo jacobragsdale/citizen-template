@@ -55,7 +55,7 @@ def resolve_type(explicit: str | None) -> str:
     if explicit:
         return explicit
     if STATE_PATH.is_file():
-        raw = json.loads(STATE_PATH.read_text())
+        raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
         app_type = raw.get("app_type")
         if app_type in {"ui", "job"}:
             return str(app_type)
@@ -120,7 +120,7 @@ def current_stage() -> str | None:
     if not STATE_PATH.is_file():
         return None
     try:
-        raw = json.loads(STATE_PATH.read_text())
+        raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
     stage = raw.get("stage")
@@ -148,7 +148,7 @@ def write_evidence(path: Path, results: list[tuple[str, bool]]) -> None:
         "ALL CHECKS PASSED" if not failed else f"FAILED: {', '.join(failed)}",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -162,8 +162,13 @@ def main() -> int:
         print("error: could not clear the previous validation evidence", file=sys.stderr)
         return 1
 
+    dependency_check = (
+        (["uv", "lock", "--check"], "dependencies lock is current")
+        if os.environ.get("UV_NO_SYNC") == "1"
+        else (["uv", "sync", "--quiet"], "dependencies install")
+    )
     checks = [
-        (["uv", "sync", "--quiet"], "dependencies install"),
+        dependency_check,
         (["uv", "run", "ruff", "check", "."], "lint"),
         (["uv", "run", "ruff", "format", "--check", "."], "format"),
         (["uv", "run", "basedpyright"], "types"),

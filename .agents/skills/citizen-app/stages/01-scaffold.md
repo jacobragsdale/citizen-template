@@ -26,9 +26,17 @@ Run this before creating anything, with `local` or `github` to match the answer:
 uv run .agents/skills/citizen-app/scripts/preflight.py --provider github --require-container
 ```
 
+For a standard-user Windows rehearsal whose image will be built by the
+fingerprinted external verifier:
+
+```powershell
+uv run .agents/skills/citizen-app/scripts/preflight.py --provider local --container-mode external
+```
+
 Translate any failure. Core tools and, for GitHub, authentication are immediate
-blockers. Docker is checked now because a locally built image is part of the
-corporate-ready handoff.
+blockers. Docker is checked now when the image will be built locally; external
+verification records the same runtime evidence without requiring Docker in the
+guest.
 
 ## Detect template versus application
 

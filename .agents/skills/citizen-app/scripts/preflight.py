@@ -80,9 +80,19 @@ def main() -> int:
         action="store_true",
         help="require an available Docker daemon for the final local image gate",
     )
+    parser.add_argument(
+        "--container-mode",
+        choices=("local", "external"),
+        default=None,
+        help="use a local daemon or a fingerprinted external verifier",
+    )
     args = parser.parse_args()
 
-    results = assess(planned_checks(args.provider, args.require_container))
+    if args.require_container and args.container_mode == "external":
+        parser.error("--require-container cannot be combined with --container-mode external")
+    require_container = args.require_container or args.container_mode == "local"
+
+    results = assess(planned_checks(args.provider, require_container))
     failures = []
     for check, passed in results:
         print(f"[{'PASS' if passed else 'NEEDS ATTENTION'}] {check.name}")
@@ -94,6 +104,9 @@ def main() -> int:
         for message in failures:
             print(f"- {message}")
         return 1
+
+    if args.container_mode == "external":
+        print("[EXTERNAL] Container build and runtime evidence will be verified elsewhere.")
 
     print("\nPreflight passed. The local build can start.")
     return 0

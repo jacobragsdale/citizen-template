@@ -25,7 +25,7 @@ from urllib.parse import urlparse
 
 STATE_PATH = Path(".plan/state.json")
 PLAN_PATH = Path(".plan/PLAN.md")
-STATE_VERSION = 2
+STATE_VERSION = 3
 
 STAGES = [
     "scaffold",
@@ -52,7 +52,12 @@ INITIAL: dict[str, Any] = {
     "repo_url": None,
     "requirements": {},
     "plan": {"approved": False, "fingerprint": None},
-    "build": {"recorded": False, "fingerprint": None},
+    "build": {
+        "recorded": False,
+        "evidence": None,
+        "evidence_fingerprint": None,
+        "fingerprint": None,
+    },
     "preview": {
         "passed": False,
         "approved": False,
@@ -72,6 +77,9 @@ INITIAL: dict[str, Any] = {
         "image_built": False,
         "tag": None,
         "image_id": None,
+        "method": None,
+        "evidence": None,
+        "evidence_fingerprint": None,
         "fingerprint": None,
     },
     "pr_url": None,
@@ -95,6 +103,20 @@ PROJECT_FILES = (
     Path("uv.lock"),
 )
 
+TEMPLATE_TEST_FILES = {
+    "test_data.py",
+    "test_preflight.py",
+    "test_preview.py",
+    "test_repo_contract.py",
+    "test_smoke.py",
+    "test_state.py",
+    "test_summary.py",
+    "test_windows_harness.py",
+}
+
+GENERATED_PROJECT_PARTS = {"__pycache__", ".pytest_cache", ".ruff_cache"}
+GENERATED_PROJECT_SUFFIXES = {".pyc", ".pyo"}
+
 
 def now_utc() -> str:
     return datetime.now(UTC).isoformat()
@@ -112,7 +134,7 @@ def deep_merge(default: dict[str, Any], current: dict[str, Any]) -> dict[str, An
 
 def normalize_state(raw: dict[str, Any]) -> dict[str, Any]:
     """Load current state and safely adapt the original workflow schema."""
-    if raw.get("version") == STATE_VERSION:
+    if raw.get("version") in {2, STATE_VERSION}:
         state = deep_merge(INITIAL, raw)
     else:
         state = deepcopy(INITIAL)
@@ -146,7 +168,7 @@ def load() -> dict[str, Any]:
     if not STATE_PATH.exists():
         sys.exit("error: no .plan/state.json — start with the scaffold playbook")
     try:
-        raw = json.loads(STATE_PATH.read_text())
+        raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         raise SystemExit(f"error: cannot read {STATE_PATH}: {exc}") from exc
     if not isinstance(raw, dict):
@@ -156,7 +178,7 @@ def load() -> dict[str, Any]:
 
 def save(state: dict[str, Any]) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps(state, indent=2) + "\n")
+    STATE_PATH.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
 
 def dotted_get(state: dict[str, Any], key: str) -> Any:
@@ -199,7 +221,13 @@ def iter_project_files() -> list[Path]:
     files = [path for path in PROJECT_FILES if path.is_file()]
     for root in (Path("src"), Path("tests")):
         if root.is_dir():
-            files.extend(path for path in root.rglob("*") if path.is_file())
+            files.extend(
+                path
+                for path in root.rglob("*")
+                if path.is_file()
+                and not GENERATED_PROJECT_PARTS.intersection(path.parts)
+                and path.suffix not in GENERATED_PROJECT_SUFFIXES
+            )
     return sorted(set(files), key=lambda path: path.as_posix())
 
 
@@ -224,6 +252,10 @@ def container_fingerprint() -> str:
     digest.update(project_fingerprint().encode())
     digest.update(dockerfile.read_bytes())
     return digest.hexdigest()
+
+
+def dockerfile_fingerprint() -> str:
+    return file_fingerprint(Path("Dockerfile"))
 
 
 def valid_url(value: Any) -> bool:
@@ -269,7 +301,12 @@ def evidence_current(state: dict[str, Any], section: str) -> bool:
 
 def container_current(state: dict[str, Any]) -> bool:
     stored = dotted_get(state, "container.fingerprint")
-    return bool(stored) and Path("Dockerfile").is_file() and stored == container_fingerprint()
+    current = bool(stored) and Path("Dockerfile").is_file() and stored == container_fingerprint()
+    if not current:
+        return False
+    if dotted_get(state, "container.method") == "external":
+        return evidence_current(state, "container")
+    return True
 
 
 def reset_from(state: dict[str, Any], target: str) -> None:
@@ -350,7 +387,11 @@ def gate_failure(state: dict[str, Any], stage: str) -> str | None:
         if not state["plan"]["approved"] or not plan_current(state):
             return "the citizen has not approved the current plan"
     elif stage == "build":
-        if not state["build"]["recorded"] or not project_current(state, "build.fingerprint"):
+        if (
+            not state["build"]["recorded"]
+            or not project_current(state, "build.fingerprint")
+            or not evidence_current(state, "build")
+        ):
             return "the current build has not been recorded"
     elif stage == "preview":
         if (
@@ -432,6 +473,16 @@ def cmd_get(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fingerprint(args: argparse.Namespace) -> int:
+    if args.kind == "project":
+        print(project_fingerprint())
+    elif args.kind == "dockerfile":
+        print(dockerfile_fingerprint())
+    else:
+        print(container_fingerprint())
+    return 0
+
+
 def validate_set_value(key: str, value: Any) -> None:
     if key == "workspace_ready" and not isinstance(value, bool):
         sys.exit("error: workspace_ready must be true or false")
@@ -459,10 +510,19 @@ def cmd_set(args: argparse.Namespace) -> int:
         allowed = ", ".join(sorted(SETTABLE_FIELDS))
         sys.exit(f"error: {args.key!r} cannot be set directly; allowed fields: {allowed}")
     state = load()
+    sources = [args.value is not None, args.value_file is not None, args.stdin]
+    if sum(sources) != 1:
+        sys.exit("error: provide exactly one value, --value-file, or --stdin")
+    if args.value_file is not None:
+        raw_value = Path(args.value_file).read_text(encoding="utf-8")
+    elif args.stdin:
+        raw_value = sys.stdin.read()
+    else:
+        raw_value = str(args.value)
     try:
-        value: Any = json.loads(args.value)
+        value: Any = json.loads(raw_value)
     except json.JSONDecodeError:
-        value = args.value
+        value = raw_value
     validate_set_value(args.key, value)
     dotted_set(state, args.key, value)
 
@@ -508,18 +568,41 @@ def build_files_ready(state: dict[str, Any]) -> str | None:
     core = Path("src/app/core.py")
     if not entrypoint.is_file() or not core.is_file():
         return "src/app/core.py and the type-specific entry point must exist"
-    contents = entrypoint.read_text() + core.read_text()
+    contents = entrypoint.read_text(encoding="utf-8") + core.read_text(encoding="utf-8")
     if "APP_TITLE" in contents or "APP_DESCRIPTION" in contents:
         return "starter placeholders remain in the application"
     behavior_tests = [
-        path for path in Path("tests").glob("test_*.py") if path.name != "test_smoke.py"
+        path for path in Path("tests").glob("test_*.py") if path.name not in TEMPLATE_TEST_FILES
     ]
     if not behavior_tests:
         return "at least one behavior test beyond the template smoke test is required"
     return None
 
 
-def cmd_record_build(_: argparse.Namespace) -> int:
+def passing_build_evidence(path: Path) -> None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise SystemExit(f"error: build evidence is not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        sys.exit("error: build evidence has an unsupported schema")
+    if payload.get("result") != "passed":
+        sys.exit("error: build evidence did not pass")
+    if payload.get("project_fingerprint") != project_fingerprint():
+        sys.exit("error: build evidence belongs to a different project revision")
+    application_tests = payload.get("application_tests")
+    if not isinstance(application_tests, list) or not application_tests:
+        sys.exit("error: build evidence does not name application-specific tests")
+    checks = payload.get("checks")
+    if (
+        not isinstance(checks, list)
+        or not checks
+        or not all(isinstance(check, dict) and check.get("passed") is True for check in checks)
+    ):
+        sys.exit("error: build evidence contains a missing or failed check")
+
+
+def cmd_record_build(args: argparse.Namespace) -> int:
     state = load()
     ensure_stage(state, "build")
     if not state["plan"]["approved"] or not plan_current(state):
@@ -527,7 +610,14 @@ def cmd_record_build(_: argparse.Namespace) -> int:
     failure = build_files_ready(state)
     if failure:
         sys.exit(f"error: {failure}")
-    state["build"] = {"recorded": True, "fingerprint": project_fingerprint()}
+    path = evidence_path(args.evidence)
+    passing_build_evidence(path)
+    state["build"] = {
+        "recorded": True,
+        "evidence": str(path),
+        "evidence_fingerprint": file_fingerprint(path),
+        "fingerprint": project_fingerprint(),
+    }
     reset_from(state, "preview")
     save(state)
     print("Recorded the current build fingerprint.")
@@ -544,7 +634,11 @@ def evidence_path(raw: str) -> Path:
 def cmd_record_preview(args: argparse.Namespace) -> int:
     state = load()
     ensure_stage(state, "preview")
-    if not state["build"]["recorded"] or not project_current(state, "build.fingerprint"):
+    if (
+        not state["build"]["recorded"]
+        or not project_current(state, "build.fingerprint")
+        or not evidence_current(state, "build")
+    ):
         sys.exit("error: build fingerprint is missing or stale")
     path = evidence_path(args.evidence)
     state["preview"] = {
@@ -578,7 +672,7 @@ def cmd_record_validation(args: argparse.Namespace) -> int:
     if not state["preview"]["approved"] or not project_current(state, "preview.fingerprint"):
         sys.exit("error: citizen preview approval is missing or stale")
     path = evidence_path(args.evidence)
-    if "ALL CHECKS PASSED" not in path.read_text():
+    if "ALL CHECKS PASSED" not in path.read_text(encoding="utf-8"):
         sys.exit("error: validation evidence does not contain ALL CHECKS PASSED")
     state["validation"] = {
         "passed": True,
@@ -605,12 +699,56 @@ def cmd_record_image(args: argparse.Namespace) -> int:
             "image_built": True,
             "tag": args.tag,
             "image_id": args.image_id,
+            "method": "local",
+            "evidence": None,
+            "evidence_fingerprint": None,
             "fingerprint": container_fingerprint(),
         }
     )
     state["pr_url"] = None
     save(state)
     print(f"Recorded local image {args.tag} ({args.image_id}).")
+    return 0
+
+
+def cmd_record_container_verification(args: argparse.Namespace) -> int:
+    state = load()
+    ensure_stage(state, "containerize")
+    if not state["validation"]["passed"] or not project_current(state, "validation.fingerprint"):
+        sys.exit("error: validation evidence is missing or stale")
+    path = evidence_path(args.evidence)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise SystemExit(f"error: container evidence is not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        sys.exit("error: container evidence has an unsupported schema")
+    if payload.get("result") != "passed" or payload.get("runtime_passed") is not True:
+        sys.exit("error: external container verification did not pass")
+    if payload.get("project_fingerprint") != project_fingerprint():
+        sys.exit("error: container evidence belongs to a different project revision")
+    if payload.get("dockerfile_fingerprint") != dockerfile_fingerprint():
+        sys.exit("error: container evidence belongs to a different Dockerfile")
+    image_id = payload.get("image_id")
+    tag = payload.get("tag")
+    if not isinstance(image_id, str) or not image_id.startswith("sha256:"):
+        sys.exit("error: container evidence does not contain a valid image ID")
+    if not isinstance(tag, str) or not tag.strip():
+        sys.exit("error: container evidence does not contain an image tag")
+    state["container"].update(
+        {
+            "image_built": True,
+            "tag": tag,
+            "image_id": image_id,
+            "method": "external",
+            "evidence": str(path),
+            "evidence_fingerprint": file_fingerprint(path),
+            "fingerprint": container_fingerprint(),
+        }
+    )
+    state["pr_url"] = None
+    save(state)
+    print(f"Recorded externally verified image {tag} ({image_id}).")
     return 0
 
 
@@ -666,9 +804,17 @@ def build_parser() -> argparse.ArgumentParser:
     get_parser.add_argument("key")
     get_parser.set_defaults(func=cmd_get)
 
+    fingerprint_parser = sub.add_parser(
+        "fingerprint", help="print a deterministic project or container fingerprint"
+    )
+    fingerprint_parser.add_argument("kind", choices=("project", "dockerfile", "container"))
+    fingerprint_parser.set_defaults(func=cmd_fingerprint)
+
     set_parser = sub.add_parser("set", help="set one approved input field")
     set_parser.add_argument("key")
-    set_parser.add_argument("value")
+    set_parser.add_argument("value", nargs="?")
+    set_parser.add_argument("--value-file", help="read the value from a UTF-8 file")
+    set_parser.add_argument("--stdin", action="store_true", help="read the value from stdin")
     set_parser.set_defaults(func=cmd_set)
 
     rewind_parser = sub.add_parser("rewind", help="move backward and clear later evidence")
@@ -678,9 +824,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("approve-plan", help="approve and fingerprint PLAN.md").set_defaults(
         func=cmd_approve_plan
     )
-    sub.add_parser("record-build", help="verify and fingerprint the build").set_defaults(
-        func=cmd_record_build
-    )
+    build_parser = sub.add_parser("record-build", help="verify and fingerprint the build")
+    build_parser.add_argument("--evidence", required=True)
+    build_parser.set_defaults(func=cmd_record_build)
 
     preview_parser = sub.add_parser("record-preview", help="record executable preview evidence")
     preview_parser.add_argument("--evidence", required=True)
@@ -700,6 +846,12 @@ def build_parser() -> argparse.ArgumentParser:
     image_parser.add_argument("--tag", required=True)
     image_parser.add_argument("--image-id", required=True)
     image_parser.set_defaults(func=cmd_record_image)
+
+    external_image_parser = sub.add_parser(
+        "record-container-verification", help="record fingerprinted external image evidence"
+    )
+    external_image_parser.add_argument("--evidence", required=True)
+    external_image_parser.set_defaults(func=cmd_record_container_verification)
 
     pr_parser = sub.add_parser("record-pr", help="record a real pull-request URL")
     pr_parser.add_argument("--url", required=True)

@@ -31,3 +31,11 @@ def test_container_handoff_adds_an_early_docker_check() -> None:
     names = [check.name for check in preflight.planned_checks("github", True)]
 
     assert names == ["uv", "git", "GitHub sign-in", "Docker"]
+
+
+def test_external_container_handoff_does_not_require_a_local_daemon() -> None:
+    preflight = load_preflight()
+
+    names = [check.name for check in preflight.planned_checks("local", False)]
+
+    assert names == ["uv", "git"]
