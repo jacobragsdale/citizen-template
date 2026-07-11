@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -28,6 +29,16 @@ def begin_workflow(workspace: Path) -> None:
     require_success(
         run_state(workspace, "set", "repo_url", "https://github.com/example/citizen-example")
     )
+    require_success(run_state(workspace, "set", "workspace_ready", "true"))
+    require_success(run_state(workspace, "advance"))
+    require_success(run_state(workspace, "set", "app_type", "ui"))
+    require_success(run_state(workspace, "advance"))
+
+
+def begin_local_workflow(workspace: Path) -> None:
+    require_success(run_state(workspace, "init", "--name", "citizen-local"))
+    require_success(run_state(workspace, "set", "repo_provider", "local"))
+    require_success(run_state(workspace, "set", "repo_visibility", "local"))
     require_success(run_state(workspace, "set", "workspace_ready", "true"))
     require_success(run_state(workspace, "advance"))
     require_success(run_state(workspace, "set", "app_type", "ui"))
@@ -71,6 +82,21 @@ def write_application(workspace: Path) -> None:
         "    result = total()\n\n    assert result == 7\n",
         encoding="utf-8",
     )
+    (workspace / ".plan/acceptance.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "criteria": [
+                    {
+                        "criterion": "The weekly result is visible",
+                        "tests": ["tests/test_total.py::test_weekly_total_is_visible"],
+                        "preview_assertions": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def record_build(workspace: Path) -> None:
@@ -83,7 +109,17 @@ def record_build(workspace: Path) -> None:
                 "schema_version": 1,
                 "result": "passed",
                 "project_fingerprint": fingerprint,
+                "plan_fingerprint": json.loads(run_state(workspace, "show", "--json").stdout)[
+                    "plan"
+                ]["fingerprint"],
                 "application_tests": ["tests/test_total.py"],
+                "collected_application_tests": [
+                    "tests/test_total.py::test_weekly_total_is_visible"
+                ],
+                "acceptance_mapping": str(workspace / ".plan/acceptance.json"),
+                "acceptance_mapping_fingerprint": hashlib.sha256(
+                    (workspace / ".plan/acceptance.json").read_bytes()
+                ).hexdigest(),
                 "checks": [{"label": "application tests", "passed": True}],
             }
         ),
@@ -97,29 +133,76 @@ def record_through_ship(workspace: Path) -> None:
     record_build(workspace)
     require_success(run_state(workspace, "advance"))
 
-    evidence = workspace / ".plan/preview/ui-summary.txt"
+    evidence = workspace / ".plan/preview/summary.json"
     evidence.parent.mkdir(parents=True)
-    evidence.write_text("DASHBOARD RENDERED\n", encoding="utf-8")
+    evidence.write_text(json.dumps({"schema_version": 1, "render_passed": True}), encoding="utf-8")
     require_success(run_state(workspace, "record-preview", "--evidence", str(evidence)))
     require_success(run_state(workspace, "advance"))
+    require_success(run_state(workspace, "record-browser-review"))
     require_success(run_state(workspace, "approve-preview"))
     require_success(run_state(workspace, "advance"))
 
-    validation = workspace / ".plan/validation/summary.txt"
+    validation = workspace / ".plan/validation/summary.json"
     validation.parent.mkdir(parents=True)
-    validation.write_text("[PASS] checks\n\nALL CHECKS PASSED\n", encoding="utf-8")
+    diagnostic = validation.parent / "diagnostics/check.log"
+    diagnostic.parent.mkdir()
+    diagnostic.write_text("passed\n", encoding="utf-8")
+    state = json.loads(run_state(workspace, "show", "--json").stdout)
+    validation.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "result": "passed",
+                "project_fingerprint": run_state(
+                    workspace, "fingerprint", "project"
+                ).stdout.strip(),
+                "plan_fingerprint": state["plan"]["fingerprint"],
+                "application_tests": ["tests/test_total.py::test_weekly_total_is_visible"],
+                "checks": [
+                    {
+                        "label": "tests",
+                        "command": ["pytest"],
+                        "exit_code": 0,
+                        "duration_seconds": 0.1,
+                        "diagnostic_log": str(diagnostic),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     require_success(run_state(workspace, "record-validation", "--evidence", str(validation)))
     require_success(run_state(workspace, "advance"))
 
     (workspace / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    container_evidence = workspace / ".plan/container/verification.json"
+    container_evidence.parent.mkdir(parents=True)
+    container_evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "result": "passed",
+                "runtime_passed": True,
+                "project_fingerprint": run_state(
+                    workspace, "fingerprint", "project"
+                ).stdout.strip(),
+                "dockerfile_fingerprint": run_state(
+                    workspace, "fingerprint", "dockerfile"
+                ).stdout.strip(),
+                "tag": "citizen-example:local",
+                "image_id": "sha256:abc123",
+            }
+        ),
+        encoding="utf-8",
+    )
     require_success(
         run_state(
             workspace,
-            "record-image",
-            "--tag",
-            "citizen-example:local",
-            "--image-id",
-            "sha256:abc123",
+            "record-container-verification",
+            "--evidence",
+            str(container_evidence),
+            "--method",
+            "local",
         )
     )
     require_success(run_state(workspace, "advance"))
@@ -132,6 +215,22 @@ def test_stage_cannot_be_changed_through_generic_set(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "cannot be set directly" in result.stderr
+
+
+def test_image_id_without_runtime_evidence_cannot_be_recorded(tmp_path: Path) -> None:
+    require_success(run_state(tmp_path, "init", "--name", "citizen-example"))
+
+    result = run_state(
+        tmp_path,
+        "record-image",
+        "--tag",
+        "citizen-example:local",
+        "--image-id",
+        "sha256:abc123",
+    )
+
+    assert result.returncode == 1
+    assert "cannot prove runtime behavior" in result.stderr
 
 
 def test_show_treats_a_brand_new_workspace_as_a_normal_start(tmp_path: Path) -> None:
@@ -181,9 +280,9 @@ def test_code_change_rejects_old_preview_approval(tmp_path: Path) -> None:
     write_application(tmp_path)
     record_build(tmp_path)
     require_success(run_state(tmp_path, "advance"))
-    evidence = tmp_path / ".plan/preview/ui-summary.txt"
+    evidence = tmp_path / ".plan/preview/summary.json"
     evidence.parent.mkdir(parents=True)
-    evidence.write_text("DASHBOARD RENDERED\n", encoding="utf-8")
+    evidence.write_text(json.dumps({"schema_version": 1, "render_passed": True}), encoding="utf-8")
     require_success(run_state(tmp_path, "record-preview", "--evidence", str(evidence)))
     require_success(run_state(tmp_path, "advance"))
     (tmp_path / "src/app/core.py").write_text(
@@ -250,10 +349,33 @@ def test_old_completed_workflow_rewinds_instead_of_reusing_unverifiable_evidence
 
     state = json.loads(run_state(tmp_path, "show", "--json").stdout)
 
-    assert state["version"] == 3
+    assert state["version"] == 4
     assert state["stage"] == "plan-review"
     assert state["plan"]["fingerprint"] is None
     assert state["preview"]["approved"] is False
+
+
+def test_version_three_local_ship_migrates_to_local_ready(tmp_path: Path) -> None:
+    plan_dir = tmp_path / ".plan"
+    plan_dir.mkdir()
+    (plan_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "stage": "ship",
+                "app_name": "citizen-local",
+                "repo_provider": "local",
+                "repo_visibility": "local",
+                "pr_url": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = json.loads(run_state(tmp_path, "show", "--json").stdout)
+
+    assert state["version"] == 4
+    assert state["stage"] == "local-ready"
 
 
 def test_requirements_can_be_read_from_a_utf8_file(tmp_path: Path) -> None:
@@ -331,3 +453,59 @@ def test_generated_python_bytecode_does_not_change_project_fingerprint(tmp_path:
     after = run_state(tmp_path, "fingerprint", "project").stdout.strip()
 
     assert after == before
+
+
+def test_dashboard_approval_requires_browser_review(tmp_path: Path) -> None:
+    begin_workflow(tmp_path)
+    approve_plan(tmp_path)
+    write_application(tmp_path)
+    record_build(tmp_path)
+    require_success(run_state(tmp_path, "advance"))
+    evidence = tmp_path / ".plan/preview/summary.json"
+    evidence.parent.mkdir(parents=True)
+    evidence.write_text(json.dumps({"schema_version": 1, "render_passed": True}), encoding="utf-8")
+    require_success(run_state(tmp_path, "record-preview", "--evidence", str(evidence)))
+    require_success(run_state(tmp_path, "advance"))
+
+    result = run_state(tmp_path, "approve-preview")
+
+    assert result.returncode == 1
+    assert "browser" in result.stderr
+
+
+def test_local_ready_can_resume_current_revision_at_ship(tmp_path: Path) -> None:
+    begin_local_workflow(tmp_path)
+    approve_plan(tmp_path)
+    record_through_ship(tmp_path)
+
+    assert run_state(tmp_path, "stage").stdout.strip() == "local-ready"
+    result = run_state(tmp_path, "advance")
+    require_success(result)
+    assert "LOCAL READY" in result.stdout
+    require_success(run_state(tmp_path, "set", "repo_provider", "github"))
+    require_success(run_state(tmp_path, "set", "repo_visibility", "private"))
+    require_success(
+        run_state(tmp_path, "set", "repo_url", "https://github.com/example/citizen-local")
+    )
+    require_success(run_state(tmp_path, "resume-ship"))
+
+    assert run_state(tmp_path, "stage").stdout.strip() == "ship"
+
+
+def test_local_ready_resume_rejects_stale_application(tmp_path: Path) -> None:
+    begin_local_workflow(tmp_path)
+    approve_plan(tmp_path)
+    record_through_ship(tmp_path)
+    require_success(run_state(tmp_path, "set", "repo_provider", "github"))
+    require_success(run_state(tmp_path, "set", "repo_visibility", "private"))
+    require_success(
+        run_state(tmp_path, "set", "repo_url", "https://github.com/example/citizen-local")
+    )
+    (tmp_path / "src/app/core.py").write_text(
+        "def total() -> int:\n    return 99\n", encoding="utf-8"
+    )
+
+    result = run_state(tmp_path, "resume-ship")
+
+    assert result.returncode == 1
+    assert "stale" in result.stderr

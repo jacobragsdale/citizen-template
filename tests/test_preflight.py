@@ -22,7 +22,7 @@ def test_local_preflight_does_not_require_github_authentication() -> None:
 
     names = [check.name for check in preflight.planned_checks("local", False)]
 
-    assert names == ["uv", "git"]
+    assert names == ["Python project tools", "Git", "Browser"]
 
 
 def test_container_handoff_adds_an_early_docker_check() -> None:
@@ -30,7 +30,13 @@ def test_container_handoff_adds_an_early_docker_check() -> None:
 
     names = [check.name for check in preflight.planned_checks("github", True)]
 
-    assert names == ["uv", "git", "GitHub sign-in", "Docker"]
+    assert names == [
+        "Python project tools",
+        "Git",
+        "Browser",
+        "GitHub sign-in",
+        "Container engine",
+    ]
 
 
 def test_external_container_handoff_does_not_require_a_local_daemon() -> None:
@@ -38,4 +44,35 @@ def test_external_container_handoff_does_not_require_a_local_daemon() -> None:
 
     names = [check.name for check in preflight.planned_checks("local", False)]
 
-    assert names == ["uv", "git"]
+    assert names == ["Python project tools", "Git", "Browser"]
+
+
+def test_capability_results_distinguish_browser_and_external_container() -> None:
+    preflight = load_preflight()
+    browser = preflight.browser_command()
+
+    capabilities, details = preflight.assess_capabilities(
+        "local",
+        "external",
+        exists=lambda command: command != browser,
+        succeeds=lambda command, **_: True,
+    )
+
+    assert capabilities["repository_provider"] == "local_only"
+    assert capabilities["container_engine"] == "externalized"
+    assert capabilities["browser"] == "missing"
+    browser = next(check for check, _ in details if check.key == "browser")
+    assert browser.blocking is False
+
+
+def test_container_engine_can_be_installed_but_not_ready() -> None:
+    preflight = load_preflight()
+
+    capabilities, _ = preflight.assess_capabilities(
+        "github",
+        "local",
+        exists=lambda _: True,
+        succeeds=lambda command, **_: command[0] != "docker",
+    )
+
+    assert capabilities["container_engine"] == "installed_not_ready"

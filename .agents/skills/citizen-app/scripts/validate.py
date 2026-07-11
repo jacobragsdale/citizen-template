@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""Run the complete local validation gate and write state-recordable evidence."""
+"""Run the complete local validation gate and write revision-bound evidence."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -18,9 +19,12 @@ import time
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+
+import state as workflow_state
 
 STATE_PATH = Path(".plan/state.json")
-DEFAULT_EVIDENCE = Path(".plan/validation/summary.txt")
+DEFAULT_EVIDENCE = Path(".plan/validation/summary.json")
 
 
 def clean_env() -> dict[str, str]:
@@ -35,20 +39,37 @@ def free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def print_tail(text: str, lines: int = 15) -> None:
-    relevant = [line for line in text.splitlines() if line.strip()]
-    if relevant:
-        print("--- last dashboard server output:")
-        for line in relevant[-lines:]:
-            print(f"    {line}")
+def diagnostic_path(directory: Path, number: int, label: str) -> Path:
+    slug = "-".join(part for part in label.lower().replace("/", " ").split() if part)
+    return directory / "diagnostics" / f"{number:02d}-{slug}.log"
 
 
-def run(command: list[str], label: str) -> bool:
-    print(f"\n=== {label} ===")
-    result = subprocess.run(command, check=False, env=clean_env())
+def run(command: list[str], label: str, log_path: Path) -> dict[str, Any]:
+    started = time.monotonic()
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        env=clean_env(),
+    )
+    duration = round(time.monotonic() - started, 3)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        f"$ {' '.join(command)}\n\nSTDOUT\n{result.stdout}\nSTDERR\n{result.stderr}",
+        encoding="utf-8",
+    )
     passed = result.returncode == 0
-    print(f"--- {label}: {'PASS' if passed else 'FAIL'}")
-    return passed
+    print(f"[{'PASS' if passed else 'FAIL'}] {label}")
+    return {
+        "label": label,
+        "command": command,
+        "exit_code": result.returncode,
+        "duration_seconds": duration,
+        "diagnostic_log": log_path.as_posix(),
+    }
 
 
 def resolve_type(explicit: str | None) -> str:
@@ -62,7 +83,32 @@ def resolve_type(explicit: str | None) -> str:
     sys.exit("error: app type is unknown; pass --type ui|job or record it in state")
 
 
-def smoke_ui_server() -> bool:
+def application_test_files() -> list[Path]:
+    return sorted(
+        path
+        for path in Path("tests").glob("test_*.py")
+        if path.name not in workflow_state.TEMPLATE_TEST_FILES
+    )
+
+
+def collected_tests(files: list[Path]) -> list[str]:
+    if not files:
+        return []
+    result = subprocess.run(
+        ["uv", "run", "pytest", "--collect-only", "-q", *[path.as_posix() for path in files]],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        env=clean_env(),
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if "::test_" in line]
+
+
+def smoke_ui_server(log_path: Path) -> dict[str, Any]:
     port = free_port()
     command = ["uv", "run"]
     if Path(".env").is_file():
@@ -77,43 +123,50 @@ def smoke_ui_server() -> bool:
             "--server.address=127.0.0.1",
         )
     )
-    print(f"\n=== dashboard server starts on port {port} ===")
+    started = time.monotonic()
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         env=clean_env(),
     )
-    health = f"http://127.0.0.1:{port}/_stcore/health"
+    exit_code = 1
+    output = ""
     try:
         for _ in range(30):
             if process.poll() is not None:
-                print("--- dashboard server starts: FAIL")
-                output, _ = process.communicate()
-                print_tail(output)
-                return False
+                break
             try:
-                with urllib.request.urlopen(health, timeout=1) as response:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/_stcore/health", timeout=1
+                ) as response:
                     if response.status == 200 and response.read().strip() == b"ok":
-                        print("--- dashboard server starts: PASS")
-                        return True
+                        exit_code = 0
+                        break
             except (OSError, TimeoutError):
                 pass
             time.sleep(1)
-        print("--- dashboard server starts: FAIL")
-        process.terminate()
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            output, _ = process.communicate(timeout=5)
-            print_tail(output)
-        return False
     finally:
         if process.poll() is None:
             process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            output, _ = process.communicate(timeout=5)
+        if process.poll() is None:
+            process.kill()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(output, encoding="utf-8")
+    passed = exit_code == 0
+    print(f"[{'PASS' if passed else 'FAIL'}] dashboard server starts")
+    return {
+        "label": "dashboard server starts",
+        "command": command,
+        "exit_code": exit_code,
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "diagnostic_log": log_path.as_posix(),
+    }
 
 
 def current_stage() -> str | None:
@@ -128,27 +181,50 @@ def current_stage() -> str | None:
 
 
 def run_state_command(*args: str) -> bool:
-    state_script = Path(__file__).with_name("state.py")
     result = subprocess.run(
-        [sys.executable, str(state_script), *args],
+        [sys.executable, str(Path(__file__).with_name("state.py")), *args],
         check=False,
         env=clean_env(),
     )
     return result.returncode == 0
 
 
-def write_evidence(path: Path, results: list[tuple[str, bool]]) -> None:
-    failed = [label for label, passed in results if not passed]
+def write_evidence(
+    path: Path,
+    checks: list[dict[str, Any]],
+    application_tests: list[str],
+    workflow_tests: list[str],
+) -> None:
+    state = workflow_state.load()
+    passed = bool(application_tests) and all(check["exit_code"] == 0 for check in checks)
+    payload = {
+        "schema_version": 1,
+        "run_at": datetime.now(UTC).isoformat(),
+        "result": "passed" if passed else "failed",
+        "project_fingerprint": workflow_state.project_fingerprint(),
+        "plan_fingerprint": state["plan"]["fingerprint"],
+        "application_tests": application_tests,
+        "workflow_tests": workflow_tests,
+        "checks": checks,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    summary = path.with_name("summary.txt")
+    failed = [check["label"] for check in checks if check["exit_code"] != 0]
     lines = [
         "Citizen app local validation",
-        f"Run at: {datetime.now(UTC).isoformat()}",
+        *(
+            f"[{'PASS' if check['exit_code'] == 0 else 'FAIL'}] {check['label']}"
+            for check in checks
+        ),
         "",
-        *(f"[{'PASS' if passed else 'FAIL'}] {label}" for label, passed in results),
-        "",
-        "ALL CHECKS PASSED" if not failed else f"FAILED: {', '.join(failed)}",
+        (
+            "ALL CHECKS PASSED"
+            if passed
+            else f"FAILED: {', '.join(failed) or 'application tests missing'}"
+        ),
     ]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    summary.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -162,53 +238,73 @@ def main() -> int:
         print("error: could not clear the previous validation evidence", file=sys.stderr)
         return 1
 
-    dependency_check = (
+    evidence_dir = args.evidence.parent
+    if (evidence_dir / "diagnostics").exists():
+        shutil.rmtree(evidence_dir / "diagnostics")
+    for path in evidence_dir.glob("summary.*"):
+        path.unlink()
+    app_files = application_test_files()
+    app_tests = collected_tests(app_files)
+    workflow_files = sorted(
+        path
+        for path in Path("tests").glob("test_*.py")
+        if path.name in workflow_state.TEMPLATE_TEST_FILES
+    )
+    workflow_tests = collected_tests(workflow_files)
+    dependency = (
         (["uv", "lock", "--check"], "dependencies lock is current")
         if os.environ.get("UV_NO_SYNC") == "1"
         else (["uv", "sync", "--quiet"], "dependencies install")
     )
-    checks = [
-        dependency_check,
+    commands = [
+        dependency,
         (["uv", "run", "ruff", "check", "."], "lint"),
         (["uv", "run", "ruff", "format", "--check", "."], "format"),
         (["uv", "run", "basedpyright"], "types"),
         (["uv", "run", "pytest", "-q"], "tests"),
     ]
-    results = [(label, run(command, label)) for command, label in checks]
-
-    preview_script = Path(__file__).with_name("preview.py")
-    render_passed = run(
-        [
-            "uv",
-            "run",
-            str(preview_script),
-            "--type",
-            app_type,
-            "--output-dir",
-            ".plan/validation/preview",
-        ],
-        "dashboard renders" if app_type == "ui" else "job dry run",
+    checks = [
+        run(command, label, diagnostic_path(evidence_dir, index, label))
+        for index, (command, label) in enumerate(commands, start=1)
+    ]
+    preview_label = "dashboard renders" if app_type == "ui" else "job dry run"
+    checks.append(
+        run(
+            [
+                "uv",
+                "run",
+                str(Path(__file__).with_name("preview.py")),
+                "--type",
+                app_type,
+                "--output-dir",
+                ".plan/validation/preview",
+            ],
+            preview_label,
+            diagnostic_path(evidence_dir, len(checks) + 1, preview_label),
+        )
     )
-    results.append(("type-specific execution", render_passed))
     if app_type == "ui":
-        results.append(("dashboard server starts", smoke_ui_server()))
+        checks.append(
+            smoke_ui_server(
+                diagnostic_path(evidence_dir, len(checks) + 1, "dashboard server starts")
+            )
+        )
 
-    write_evidence(args.evidence, results)
-    print("\n" + "=" * 40 + "\nSUMMARY")
-    for label, passed in results:
-        print(f"[{'PASS' if passed else 'FAIL'}] {label}")
-
-    failures = [label for label, passed in results if not passed]
-    if not failures and record_in_state:
-        recorded = run_state_command("record-validation", "--evidence", str(args.evidence))
-        if not recorded:
-            results.append(("state evidence recorded", False))
-            write_evidence(args.evidence, results)
-            failures.append("state evidence recorded")
-    if failures:
-        print(f"\n{len(failures)} check(s) failed. Evidence: {args.evidence}")
+    write_evidence(args.evidence, checks, app_tests, workflow_tests)
+    failed = [check["label"] for check in checks if check["exit_code"] != 0]
+    if not app_tests:
+        failed.append("application tests missing")
+    if (
+        not failed
+        and record_in_state
+        and not run_state_command("record-validation", "--evidence", str(args.evidence))
+    ):
+        failed.append("state evidence recorded")
+    if failed:
+        summary = args.evidence.with_name("summary.txt")
+        print(f"Validation failed: {', '.join(failed)}. See {summary}.")
         return 1
-    print(f"\nALL CHECKS PASSED\nEvidence: {args.evidence}")
+    print(f"ALL CHECKS PASSED\nEvidence: {args.evidence}")
     return 0
 
 

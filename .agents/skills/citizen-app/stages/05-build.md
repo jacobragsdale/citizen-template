@@ -6,25 +6,19 @@ job entry point, and behavior tests tied to the success criteria.
 ## Project identity
 
 Set `[project].name` to the repository slug while keeping the import package
-named `app`. Use a TOML-aware edit or a narrow, verified replacement; run
-`uv lock` afterward.
+named `app`:
+
+```text
+uv run .agents/skills/citizen-app/scripts/project.py set-identity --name citizen-<slug>
+```
 
 ## Copy the correct starters
 
-Dashboard:
+Use `ui` or `job` to match the recorded choice. The helper copies the correct
+starter idempotently and adds dashboard dependencies when needed:
 
-```bash
-cp .agents/skills/citizen-app/assets/ui-streamlit/core.py.template src/app/core.py
-cp .agents/skills/citizen-app/assets/ui-streamlit/ui.py.template src/app/ui.py
-cp .agents/skills/citizen-app/assets/ui-streamlit/present.py.template src/app/present.py
-uv add streamlit pandas
-```
-
-Automated job:
-
-```bash
-cp .agents/skills/citizen-app/assets/job-cronjob/core.py.template src/app/core.py
-cp .agents/skills/citizen-app/assets/job-cronjob/job.py.template src/app/job.py
+```text
+uv run .agents/skills/citizen-app/scripts/project.py apply-starter --type ui
 ```
 
 ## Implement the plan
@@ -58,6 +52,25 @@ Write behavior-named pytest tests for every acceptance criterion that can be
 checked locally. Expected values come from the approved plan, not copied from
 the implementation. Use pure functions and small representative inputs; do not
 mock framework internals.
+
+Write `.plan/acceptance.json` with schema version 1 and one entry per criterion:
+
+```json
+{
+  "schema_version": 1,
+  "criteria": [
+    {
+      "criterion": "A user can compare several stock symbols",
+      "tests": ["tests/test_stock_dashboard.py::test_multiple_symbols_are_compared"],
+      "preview_assertions": ["comparison_symbol_count"]
+    }
+  ]
+}
+```
+
+For dashboard interactions that generic rendering cannot prove, add
+`tests/preview_assertions.py`. It must execute the representative AppTest
+interactions and fail on an unmet result; the preview helper records its output.
 
 Replace the generated app README sections with:
 

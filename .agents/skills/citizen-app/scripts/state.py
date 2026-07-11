@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import sys
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -25,7 +26,7 @@ from urllib.parse import urlparse
 
 STATE_PATH = Path(".plan/state.json")
 PLAN_PATH = Path(".plan/PLAN.md")
-STATE_VERSION = 3
+STATE_VERSION = 4
 
 STAGES = [
     "scaffold",
@@ -37,6 +38,7 @@ STAGES = [
     "user-review",
     "validate",
     "containerize",
+    "local-ready",
     "ship",
     "done",
 ]
@@ -60,6 +62,8 @@ INITIAL: dict[str, Any] = {
     },
     "preview": {
         "passed": False,
+        "render_passed": False,
+        "browser_reviewed": False,
         "approved": False,
         "evidence": None,
         "evidence_fingerprint": None,
@@ -97,6 +101,7 @@ SETTABLE_FIELDS = {
 
 PROJECT_FILES = (
     Path(".plan/PLAN.md"),
+    Path(".plan/acceptance.json"),
     Path(".env.example"),
     Path("README.md"),
     Path("pyproject.toml"),
@@ -106,6 +111,7 @@ PROJECT_FILES = (
 TEMPLATE_TEST_FILES = {
     "test_data.py",
     "test_preflight.py",
+    "test_project.py",
     "test_preview.py",
     "test_repo_contract.py",
     "test_smoke.py",
@@ -134,7 +140,7 @@ def deep_merge(default: dict[str, Any], current: dict[str, Any]) -> dict[str, An
 
 def normalize_state(raw: dict[str, Any]) -> dict[str, Any]:
     """Load current state and safely adapt the original workflow schema."""
-    if raw.get("version") in {2, STATE_VERSION}:
+    if raw.get("version") in {2, 3, STATE_VERSION}:
         state = deep_merge(INITIAL, raw)
     else:
         state = deepcopy(INITIAL)
@@ -159,6 +165,13 @@ def normalize_state(raw: dict[str, Any]) -> dict[str, Any]:
             state["stage"] = old_stage
 
     state["version"] = STATE_VERSION
+    if (
+        raw.get("version") in {2, 3}
+        and state.get("stage") == "ship"
+        and state.get("repo_provider") == "local"
+        and not state.get("pr_url")
+    ):
+        state["stage"] = "local-ready"
     if state.get("stage") not in STAGES:
         sys.exit(f"error: unknown workflow stage {state.get('stage')!r}")
     return state
@@ -302,11 +315,7 @@ def evidence_current(state: dict[str, Any], section: str) -> bool:
 def container_current(state: dict[str, Any]) -> bool:
     stored = dotted_get(state, "container.fingerprint")
     current = bool(stored) and Path("Dockerfile").is_file() and stored == container_fingerprint()
-    if not current:
-        return False
-    if dotted_get(state, "container.method") == "external":
-        return evidence_current(state, "container")
-    return True
+    return current and evidence_current(state, "container")
 
 
 def reset_from(state: dict[str, Any], target: str) -> None:
@@ -360,6 +369,36 @@ def prior_delivery_evidence_current(state: dict[str, Any]) -> str | None:
     ):
         return "the required container result is missing or stale; rewind to containerize"
     return None
+
+
+def passing_validation_evidence(path: Path, state: dict[str, Any]) -> None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise SystemExit(f"error: validation evidence is not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        sys.exit("error: validation evidence has an unsupported schema")
+    if payload.get("result") != "passed":
+        sys.exit("error: validation evidence did not pass")
+    if payload.get("project_fingerprint") != project_fingerprint():
+        sys.exit("error: validation evidence belongs to a different project revision")
+    if payload.get("plan_fingerprint") != state["plan"]["fingerprint"]:
+        sys.exit("error: validation evidence belongs to a different approved plan")
+    application_tests = payload.get("application_tests")
+    if not isinstance(application_tests, list) or not application_tests:
+        sys.exit("error: validation evidence does not name application-specific tests")
+    checks = payload.get("checks")
+    if not isinstance(checks, list) or not checks:
+        sys.exit("error: validation evidence contains no checks")
+    for check in checks:
+        if not isinstance(check, dict):
+            sys.exit("error: validation evidence contains an invalid check")
+        required = {"label", "command", "exit_code", "duration_seconds", "diagnostic_log"}
+        if not required.issubset(check) or check.get("exit_code") != 0:
+            sys.exit("error: validation evidence contains an incomplete or failed check")
+        diagnostic = check.get("diagnostic_log")
+        if not isinstance(diagnostic, str) or not Path(diagnostic).is_file():
+            sys.exit("error: validation evidence references a missing diagnostic log")
 
 
 def gate_failure(state: dict[str, Any], stage: str) -> str | None:
@@ -417,6 +456,10 @@ def gate_failure(state: dict[str, Any], stage: str) -> str | None:
     elif stage == "containerize" and state["container"]["required"]:
         if not state["container"]["image_built"] or not container_current(state):
             return "the required local container image has not been recorded"
+    elif stage == "local-ready":
+        prior_failure = prior_delivery_evidence_current(state)
+        if prior_failure:
+            return prior_failure
     elif stage == "ship":
         prior_failure = prior_delivery_evidence_current(state)
         if prior_failure:
@@ -457,6 +500,11 @@ def cmd_show(args: argparse.Namespace) -> int:
     failure = gate_failure(state, state["stage"])
     if failure:
         print(f"Next gate: {failure}.")
+    elif state["stage"] == "local-ready":
+        print(
+            "Local verification is complete. No repository or pull request was created; "
+            "add a repository adapter, then resume publication with resume-ship."
+        )
     elif state["stage"] == "done":
         print(
             "The pull request is ready for the internal delivery pipeline; "
@@ -550,6 +598,38 @@ def cmd_rewind(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_record_workspace(args: argparse.Namespace) -> int:
+    state = load()
+    ensure_stage(state, "scaffold")
+    if args.provider == "local":
+        repo_url = None
+        visibility = "local"
+    else:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        repo_url = result.stdout.strip()
+        if result.returncode != 0 or not repo_url:
+            sys.exit("error: the GitHub workspace has no origin repository URL")
+        visibility = args.visibility
+    state.update(
+        {
+            "repo_provider": args.provider,
+            "repo_visibility": visibility,
+            "repo_url": repo_url,
+            "workspace_ready": True,
+        }
+    )
+    save(state)
+    print(f"Recorded the {args.provider} working repository.")
+    return 0
+
+
 def cmd_approve_plan(_: argparse.Namespace) -> int:
     state = load()
     ensure_stage(state, "plan-review")
@@ -590,9 +670,22 @@ def passing_build_evidence(path: Path) -> None:
         sys.exit("error: build evidence did not pass")
     if payload.get("project_fingerprint") != project_fingerprint():
         sys.exit("error: build evidence belongs to a different project revision")
+    state = load()
+    if payload.get("plan_fingerprint") != state["plan"]["fingerprint"]:
+        sys.exit("error: build evidence belongs to a different approved plan")
     application_tests = payload.get("application_tests")
     if not isinstance(application_tests, list) or not application_tests:
         sys.exit("error: build evidence does not name application-specific tests")
+    collected = payload.get("collected_application_tests")
+    if not isinstance(collected, list) or not collected:
+        sys.exit("error: build evidence collected zero application-specific tests")
+    acceptance_path = payload.get("acceptance_mapping")
+    acceptance_fingerprint = payload.get("acceptance_mapping_fingerprint")
+    if (
+        not isinstance(acceptance_path, str)
+        or existing_file_fingerprint(Path(acceptance_path)) != acceptance_fingerprint
+    ):
+        sys.exit("error: build acceptance mapping is missing or stale")
     checks = payload.get("checks")
     if (
         not isinstance(checks, list)
@@ -641,8 +734,20 @@ def cmd_record_preview(args: argparse.Namespace) -> int:
     ):
         sys.exit("error: build fingerprint is missing or stale")
     path = evidence_path(args.evidence)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise SystemExit(f"error: preview evidence is not valid JSON: {exc}") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != 1
+        or payload.get("render_passed") is not True
+    ):
+        sys.exit("error: preview evidence does not prove a successful render or dry run")
     state["preview"] = {
         "passed": True,
+        "render_passed": True,
+        "browser_reviewed": state["app_type"] == "job",
         "approved": False,
         "evidence": str(path),
         "evidence_fingerprint": file_fingerprint(path),
@@ -654,11 +759,26 @@ def cmd_record_preview(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_record_browser_review(_: argparse.Namespace) -> int:
+    state = load()
+    ensure_stage(state, "user-review")
+    if state["app_type"] != "ui":
+        sys.exit("error: browser review applies only to dashboards")
+    if not state["preview"]["render_passed"] or not project_current(state, "preview.fingerprint"):
+        sys.exit("error: preview render evidence is missing or stale")
+    state["preview"]["browser_reviewed"] = True
+    save(state)
+    print("Recorded browser review of the current dashboard revision.")
+    return 0
+
+
 def cmd_approve_preview(_: argparse.Namespace) -> int:
     state = load()
     ensure_stage(state, "user-review")
     if not state["preview"]["passed"] or not project_current(state, "preview.fingerprint"):
         sys.exit("error: preview evidence is missing or stale")
+    if state["app_type"] == "ui" and not state["preview"]["browser_reviewed"]:
+        sys.exit("error: the current dashboard has not been reviewed in a browser")
     state["preview"]["approved"] = True
     reset_from(state, "validate")
     save(state)
@@ -672,8 +792,7 @@ def cmd_record_validation(args: argparse.Namespace) -> int:
     if not state["preview"]["approved"] or not project_current(state, "preview.fingerprint"):
         sys.exit("error: citizen preview approval is missing or stale")
     path = evidence_path(args.evidence)
-    if "ALL CHECKS PASSED" not in path.read_text(encoding="utf-8"):
-        sys.exit("error: validation evidence does not contain ALL CHECKS PASSED")
+    passing_validation_evidence(path, state)
     state["validation"] = {
         "passed": True,
         "last_run": now_utc(),
@@ -688,27 +807,11 @@ def cmd_record_validation(args: argparse.Namespace) -> int:
 
 
 def cmd_record_image(args: argparse.Namespace) -> int:
-    state = load()
-    ensure_stage(state, "containerize")
-    if not state["validation"]["passed"] or not project_current(state, "validation.fingerprint"):
-        sys.exit("error: validation evidence is missing or stale")
-    if not args.image_id.startswith("sha256:"):
-        sys.exit("error: image ID must be the sha256 ID returned by docker image inspect")
-    state["container"].update(
-        {
-            "image_built": True,
-            "tag": args.tag,
-            "image_id": args.image_id,
-            "method": "local",
-            "evidence": None,
-            "evidence_fingerprint": None,
-            "fingerprint": container_fingerprint(),
-        }
+    del args
+    sys.exit(
+        "error: record-image cannot prove runtime behavior; run container.py or record "
+        "fingerprinted container verification evidence"
     )
-    state["pr_url"] = None
-    save(state)
-    print(f"Recorded local image {args.tag} ({args.image_id}).")
-    return 0
 
 
 def cmd_record_container_verification(args: argparse.Namespace) -> int:
@@ -740,7 +843,7 @@ def cmd_record_container_verification(args: argparse.Namespace) -> int:
             "image_built": True,
             "tag": tag,
             "image_id": image_id,
-            "method": "external",
+            "method": args.method,
             "evidence": str(path),
             "evidence_fingerprint": file_fingerprint(path),
             "fingerprint": container_fingerprint(),
@@ -748,7 +851,7 @@ def cmd_record_container_verification(args: argparse.Namespace) -> int:
     )
     state["pr_url"] = None
     save(state)
-    print(f"Recorded externally verified image {tag} ({image_id}).")
+    print(f"Recorded {args.method} verified image {tag} ({image_id}).")
     return 0
 
 
@@ -770,17 +873,47 @@ def cmd_record_pr(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resume_ship(_: argparse.Namespace) -> int:
+    state = load()
+    ensure_stage(state, "local-ready")
+    if state["repo_provider"] == "local" or not valid_url(state["repo_url"]):
+        sys.exit(
+            "error: record a supported repository provider and HTTPS repository URL "
+            "before resuming publication"
+        )
+    prior_failure = prior_delivery_evidence_current(state)
+    if prior_failure:
+        sys.exit(f"error: {prior_failure}")
+    state["stage"] = "ship"
+    save(state)
+    print("Resumed the current verified revision at 'ship'; no checks were repeated.")
+    return 0
+
+
 def cmd_advance(_: argparse.Namespace) -> int:
     state = load()
     current = state["stage"]
     if current == "done":
         print("Already done: the PR is ready for the internal delivery pipeline.")
         return 0
+    if current == "local-ready":
+        failure = gate_failure(state, current)
+        if failure:
+            print(f"BLOCKED: local verification is stale — {failure}", file=sys.stderr)
+            return 2
+        print(
+            "LOCAL READY: the reviewed application and evidence are preserved. "
+            "No pull request or deployment was created."
+        )
+        return 0
     failure = gate_failure(state, current)
     if failure:
         print(f"BLOCKED: cannot leave {current!r} — {failure}", file=sys.stderr)
         return 2
-    next_stage = STAGES[STAGES.index(current) + 1]
+    if current == "containerize" and state["repo_provider"] != "local":
+        next_stage = "ship"
+    else:
+        next_stage = STAGES[STAGES.index(current) + 1]
     state["stage"] = next_stage
     save(state)
     print(f"Advanced: {current} -> {next_stage}")
@@ -821,6 +954,15 @@ def build_parser() -> argparse.ArgumentParser:
     rewind_parser.add_argument("stage", choices=STAGES[:-1])
     rewind_parser.set_defaults(func=cmd_rewind)
 
+    workspace_parser = sub.add_parser(
+        "record-workspace", help="record the current local or GitHub working repository"
+    )
+    workspace_parser.add_argument("--provider", choices=("local", "github"), required=True)
+    workspace_parser.add_argument(
+        "--visibility", choices=("private", "internal", "public"), default="private"
+    )
+    workspace_parser.set_defaults(func=cmd_record_workspace)
+
     sub.add_parser("approve-plan", help="approve and fingerprint PLAN.md").set_defaults(
         func=cmd_approve_plan
     )
@@ -831,6 +973,10 @@ def build_parser() -> argparse.ArgumentParser:
     preview_parser = sub.add_parser("record-preview", help="record executable preview evidence")
     preview_parser.add_argument("--evidence", required=True)
     preview_parser.set_defaults(func=cmd_record_preview)
+
+    sub.add_parser(
+        "record-browser-review", help="record that the current dashboard was visible in a browser"
+    ).set_defaults(func=cmd_record_browser_review)
 
     sub.add_parser("approve-preview", help="approve the working preview").set_defaults(
         func=cmd_approve_preview
@@ -851,7 +997,14 @@ def build_parser() -> argparse.ArgumentParser:
         "record-container-verification", help="record fingerprinted external image evidence"
     )
     external_image_parser.add_argument("--evidence", required=True)
+    external_image_parser.add_argument(
+        "--method", choices=("local", "external"), default="external"
+    )
     external_image_parser.set_defaults(func=cmd_record_container_verification)
+
+    sub.add_parser(
+        "resume-ship", help="resume a current local-ready revision after adding a repository"
+    ).set_defaults(func=cmd_resume_ship)
 
     pr_parser = sub.add_parser("record-pr", help="record a real pull-request URL")
     pr_parser.add_argument("--url", required=True)

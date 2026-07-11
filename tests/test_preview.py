@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +51,9 @@ def test_job_preview_executes_dry_run_and_writes_evidence(tmp_path: Path) -> Non
     assert (output_dir / "job-output.txt").read_text(
         encoding="utf-8"
     ) == "DRY RUN — report prepared\n"
+    structured = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    assert structured["render_passed"] is True
+    assert structured["app_type"] == "job"
 
 
 def test_ui_preview_executes_page_and_rejects_render_exceptions() -> None:
@@ -60,9 +64,11 @@ def test_ui_preview_executes_page_and_rejects_render_exceptions() -> None:
     assert "AppTest.from_file" in app_test_program
     assert "if app.exception" in app_test_program
     assert "DASHBOARD RENDERED" in app_test_program
-    assert "number inputs" in app_test_program
+    assert "number_inputs" in app_test_program
     assert "multiselects" in app_test_program
     assert "metrics" in app_test_program
+    assert "charts" in app_test_program
+    assert "date_inputs" in app_test_program
 
 
 def test_successful_preview_keeps_stderr_out_of_approval_evidence(tmp_path: Path) -> None:

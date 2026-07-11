@@ -19,6 +19,7 @@ from typing import Any
 import state as workflow_state
 
 DEFAULT_EVIDENCE = Path(".plan/build/summary.json")
+ACCEPTANCE_PATH = Path(".plan/acceptance.json")
 
 
 def application_tests() -> list[Path]:
@@ -49,13 +50,72 @@ def run_check(label: str, command: list[str]) -> dict[str, Any]:
     }
 
 
-def write_evidence(path: Path, checks: list[dict[str, Any]], tests: list[Path]) -> None:
+def load_acceptance_mapping(tests: list[Path], expected_criteria: list[str]) -> dict[str, Any]:
+    try:
+        payload = json.loads(ACCEPTANCE_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise SystemExit(f"error: acceptance mapping is missing or invalid: {exc}") from exc
+    criteria = payload.get("criteria") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != 1
+        or not isinstance(criteria, list)
+        or not criteria
+    ):
+        sys.exit("error: acceptance mapping has an unsupported or empty schema")
+    known_files = {path.as_posix() for path in tests}
+    mapped_criteria: list[str] = []
+    for item in criteria:
+        if not isinstance(item, dict) or not isinstance(item.get("criterion"), str):
+            sys.exit("error: acceptance mapping contains an invalid criterion")
+        mapped_criteria.append(item["criterion"])
+        mapped_tests = item.get("tests")
+        assertions = item.get("preview_assertions")
+        if not isinstance(mapped_tests, list) or not mapped_tests:
+            sys.exit("error: every acceptance criterion must name at least one test")
+        if not all(
+            isinstance(node, str) and node.split("::", 1)[0] in known_files for node in mapped_tests
+        ):
+            sys.exit("error: acceptance mapping refers to a non-application test")
+        if not isinstance(assertions, list) or not all(
+            isinstance(value, str) and value.strip() for value in assertions
+        ):
+            sys.exit("error: preview_assertions must be a list of names")
+    if mapped_criteria != expected_criteria:
+        sys.exit("error: acceptance mapping must cover every approved criterion in order")
+    return payload
+
+
+def collect_test_names(tests: list[Path]) -> tuple[dict[str, Any], list[str]]:
+    check = run_check(
+        "collect application tests",
+        ["uv", "run", "pytest", "--collect-only", "-q", *[test.as_posix() for test in tests]],
+    )
+    names = [line.strip() for line in check["stdout"].splitlines() if "::test_" in line]
+    if not names:
+        check["passed"] = False
+    return check, names
+
+
+def write_evidence(
+    path: Path,
+    checks: list[dict[str, Any]],
+    tests: list[Path],
+    collected: list[str],
+    acceptance: dict[str, Any],
+) -> None:
+    state = workflow_state.load()
     payload = {
         "schema_version": 1,
         "run_at": datetime.now(UTC).isoformat(),
         "result": "passed" if all(check["passed"] for check in checks) else "failed",
         "project_fingerprint": workflow_state.project_fingerprint(),
+        "plan_fingerprint": state["plan"]["fingerprint"],
         "application_tests": [test.as_posix() for test in tests],
+        "collected_application_tests": collected,
+        "acceptance_mapping": ACCEPTANCE_PATH.as_posix(),
+        "acceptance_mapping_fingerprint": workflow_state.file_fingerprint(ACCEPTANCE_PATH),
+        "acceptance_criteria": acceptance["criteria"],
         "checks": checks,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,6 +138,13 @@ def main() -> int:
         return 1
 
     state = workflow_state.load()
+    requirements = state.get("requirements")
+    expected_criteria = requirements.get("acceptance_criteria", [])
+    if not isinstance(expected_criteria, list) or not all(
+        isinstance(value, str) for value in expected_criteria
+    ):
+        sys.exit("error: approved acceptance criteria are missing")
+    acceptance = load_acceptance_mapping(tests, expected_criteria)
     app_type = state.get("app_type")
     entrypoint = Path("src/app/ui.py" if app_type == "ui" else "src/app/job.py")
     commands = [
@@ -93,8 +160,9 @@ def main() -> int:
             ["uv", "run", "python", "-m", "py_compile", "src/app/core.py", str(entrypoint)],
         ),
     ]
-    checks = [run_check(label, command) for label, command in commands]
-    write_evidence(args.evidence, checks, tests)
+    collection_check, collected = collect_test_names(tests)
+    checks = [collection_check, *[run_check(label, command) for label, command in commands]]
+    write_evidence(args.evidence, checks, tests, collected, acceptance)
 
     for check in checks:
         print(f"[{'PASS' if check['passed'] else 'FAIL'}] {check['label']}")

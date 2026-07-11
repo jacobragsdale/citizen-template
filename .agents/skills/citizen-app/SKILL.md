@@ -53,7 +53,8 @@ On every invocation:
 | `user-review` | `stages/07-user-review.md` | explicit approval of the working result |
 | `validate` | `stages/08-validate.md` | lint, format, types, tests, render, and smoke checks pass |
 | `containerize` | `stages/09-containerize.md` | local container image ID recorded when required |
-| `ship` | `stages/10-ship.md` | a real pull-request URL recorded |
+| `local-ready` | `stages/10-local-ready.md` | current local evidence preserved without publication |
+| `ship` | `stages/11-ship.md` | a real pull-request URL recorded |
 | `done` | — | hand off the PR as ready for internal delivery |
 
 If requirements or code change after approval, use `state.py rewind <stage>`
@@ -76,6 +77,7 @@ boundary or implementing an internal provider.
 ## Bundled resources
 
 - `scripts/state.py` — **run** for state transitions, approvals, evidence, and rewinds.
+- `scripts/project.py` — **run** for shell-neutral local creation, identity, and starters.
 - `scripts/preflight.py` — **run** before repository creation; it fails early on missing tools.
 - `scripts/build.py` — **run** for current lint, type, compile, and application-test evidence.
 - `scripts/preview.py` — **run** to execute the page or job and write preview evidence.

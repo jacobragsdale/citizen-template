@@ -10,8 +10,9 @@ uv run .agents/skills/citizen-app/scripts/preview.py
 ```
 
 It reads the application type from state, executes the Streamlit page through
-`AppTest` or runs the job in dry-run mode, and writes non-empty evidence under
-`.plan/preview/`.
+`AppTest` or runs the job in dry-run mode, and writes a short human summary plus
+versioned `.plan/preview/summary.json`. Dashboard evidence inventories controls,
+metrics, tables, charts, warnings, errors, and acceptance-specific interactions.
 
 For a dashboard, also start the local Streamlit server on an available port.
 Open that exact local URL using the available browser capability and show the
@@ -34,8 +35,8 @@ Once the preview works, record the evidence file printed by the helper and
 advance:
 
 ```bash
-uv run .agents/skills/citizen-app/scripts/state.py record-preview --evidence .plan/preview/ui-summary.txt
+uv run .agents/skills/citizen-app/scripts/state.py record-preview --evidence .plan/preview/summary.json
 uv run .agents/skills/citizen-app/scripts/state.py advance
 ```
 
-Use `.plan/preview/job-output.txt` for an automated job.
+The structured evidence path is the same for dashboards and automated jobs.

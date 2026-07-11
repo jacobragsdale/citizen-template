@@ -80,7 +80,7 @@ class HarnessRun:
             [sys.executable, str(STATE_SCRIPT), *arguments],
             expected=expected,
         )
-        return result.stdout
+        return result.stdout + result.stderr
 
     def write_commands(self) -> None:
         path = self.evidence_dir / "commands.jsonl"
@@ -340,6 +340,54 @@ def write_application(run: HarnessRun, app_type: str) -> None:
         "Representative sample data is used for this Windows rehearsal.\n\n"
         "Delivery status: ready for internal pipeline after PR approval.\n",
     )
+    if app_type == "ui":
+        criteria = [
+            {
+                "criterion": "The page clearly labels the stock rows as sample data",
+                "tests": ["tests/test_harness_dashboard.py::test_selected_symbols_are_compared"],
+                "preview_assertions": ["sample_data_label"],
+            },
+            {
+                "criterion": "Average price and volume are visible",
+                "tests": [
+                    "tests/test_harness_dashboard.py::test_average_price_and_volume_are_calculated",
+                ],
+                "preview_assertions": ["average_metrics"],
+            },
+            {
+                "criterion": "A user can compare one or more symbols",
+                "tests": ["tests/test_harness_dashboard.py::test_selected_symbols_are_compared"],
+                "preview_assertions": ["comparison_symbol_count"],
+            },
+        ]
+    else:
+        criteria = [
+            {
+                "criterion": "The output includes the bond record count",
+                "tests": [
+                    "tests/test_harness_job.py::test_bond_summary_includes_count_and_numeric_statistics"
+                ],
+                "preview_assertions": ["record_count"],
+            },
+            {
+                "criterion": "Numeric fields include minimum, maximum, and average values",
+                "tests": [
+                    "tests/test_harness_job.py::test_bond_summary_includes_count_and_numeric_statistics"
+                ],
+                "preview_assertions": ["numeric_statistics"],
+            },
+            {
+                "criterion": "A successful run exits with code zero",
+                "tests": [
+                    "tests/test_harness_job.py::test_bond_summary_includes_count_and_numeric_statistics"
+                ],
+                "preview_assertions": ["dry_run_exit_code"],
+            },
+        ]
+    write(
+        ".plan/acceptance.json",
+        json.dumps({"schema_version": 1, "criteria": criteria}, indent=2),
+    )
 
 
 def record_build(run: HarnessRun) -> None:
@@ -349,11 +397,10 @@ def record_build(run: HarnessRun) -> None:
 
 def record_preview_and_approval(run: HarnessRun, app_type: str) -> None:
     run.run("execute preview", ["uv", "run", str(PREVIEW_SCRIPT)])
-    evidence = (
-        ".plan/preview/ui-summary.txt" if app_type == "ui" else ".plan/preview/job-output.txt"
-    )
-    run.state("record preview", "record-preview", "--evidence", evidence)
+    run.state("record preview", "record-preview", "--evidence", ".plan/preview/summary.json")
     run.state("advance preview", "advance")
+    if app_type == "ui":
+        run.state("record controller browser review", "record-browser-review")
     run.state("approve preview", "approve-preview")
     run.state("advance user review", "advance")
 
@@ -387,7 +434,7 @@ def revision_stress(run: HarnessRun) -> None:
         "reject stale build before preview",
         "record-preview",
         "--evidence",
-        ".plan/preview/ui-summary.txt",
+        ".plan/preview/summary.json",
         expected=(1,),
     )
     if "stale" not in rejected:
@@ -472,10 +519,19 @@ def main() -> int:
                 "external",
             ],
         )
-    elif args.scenario in {"dashboard-happy", "encoding-paths", "missing-browser"}:
+    elif args.scenario in {"dashboard-happy", "encoding-paths"}:
         happy_path(run, "ui")
-        if args.scenario == "missing-browser":
-            write(run.evidence_dir / "preview/browser.json", '{"available": false}\n')
+    elif args.scenario == "missing-browser":
+        scaffold(run, "ui")
+        write_application(run, "ui")
+        record_build(run)
+        run.run("execute preview", ["uv", "run", str(PREVIEW_SCRIPT)])
+        run.state("record preview", "record-preview", "--evidence", ".plan/preview/summary.json")
+        run.state("advance preview", "advance")
+        rejected = run.state("reject approval without browser", "approve-preview", expected=(1,))
+        if "browser" not in rejected.lower():
+            raise RuntimeError("missing-browser rejection was not actionable")
+        write(run.evidence_dir / "preview/browser.json", '{"available": false}\n')
     elif args.scenario in {"job-happy", "resume"}:
         happy_path(run, "job")
         if args.scenario == "resume":

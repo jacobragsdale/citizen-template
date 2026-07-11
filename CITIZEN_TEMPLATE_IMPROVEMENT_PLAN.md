@@ -1,6 +1,6 @@
 # Citizen template improvement plan
 
-Status: active; first Windows-driven P0/P1 tranche implemented
+Status: implementation complete; cross-platform release evidence remains active
 
 ## Purpose
 
@@ -45,9 +45,15 @@ Live disposable-VM proof now includes complete job and dashboard workflows at
 8 GB, controller-browser review of the dashboard, external Linux image runtime
 checks for both application types, and a successful 4 GB bootstrap stress run.
 
-This does not close the program plan. Local completion semantics, citizen-facing
-diagnostic cleanup, broader generated-project helpers, the full failure matrix,
-and the 20-run reliability proof remain follow-up work.
+The follow-up implementation now also includes shell-neutral project and starter
+helpers, acceptance mappings, structured validation with per-check diagnostics,
+capability-level preflight, explicit browser-review evidence, runtime-only image
+recording, and `local-ready` completion with deterministic publication resume.
+
+The repository implementation is complete. Release qualification is still open:
+the full Linux/macOS/Windows failure matrix and 20 fresh standard-user Windows
+runs require disposable external machines and must not be inferred from local
+unit or contract tests.
 
 ## Program goals
 

@@ -40,8 +40,8 @@ guest.
 
 ## Detect template versus application
 
-```bash
-git remote get-url origin 2>/dev/null
+```text
+uv run .agents/skills/citizen-app/scripts/project.py inspect
 ```
 
 If `.plan/state.json` exists or the repository name already begins with
@@ -51,36 +51,18 @@ If `.plan/state.json` exists or the repository name already begins with
 
 ### Private GitHub repository
 
-Do not assume the template and destination have the same owner. Discover the
-current template repository and authenticated destination owner:
+Do not assume the template and destination have the same owner. The helper
+discovers both, creates a private repository, polls template population, clones
+it, and rejects an empty working copy:
 
-```bash
-TEMPLATE=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
-OWNER=$(gh api user --jq .login)
-DEST="$OWNER/citizen-<slug>"
-gh repo create "$DEST" --template "$TEMPLATE" --private
+```text
+uv run .agents/skills/citizen-app/scripts/project.py create-github --name citizen-<slug> --destination ../citizen-<slug>
 ```
-
-Template population can lag behind repository creation. Poll for a known file
-before cloning, then verify the clone instead of accepting an empty directory:
-
-```bash
-for attempt in 1 2 3 4 5; do
-  gh api "repos/$DEST/contents/pyproject.toml" >/dev/null 2>&1 && break
-  sleep 2
-done
-git clone "https://github.com/$DEST.git" "../citizen-<slug>"
-test -f "../citizen-<slug>/pyproject.toml"
-```
-
-If the final check fails, fetch and check out the populated default branch in
-the new clone. Do not continue with an empty working copy.
 
 ### Local draft
 
-```bash
-git clone --no-hardlinks "$PWD" "../citizen-<slug>"
-git -C "../citizen-<slug>" remote remove origin
+```text
+uv run .agents/skills/citizen-app/scripts/project.py create-local --name citizen-<slug> --destination ../citizen-<slug>
 ```
 
 Run every remaining command from the new sibling folder.
@@ -89,17 +71,19 @@ Run every remaining command from the new sibling folder.
 
 From the application repository:
 
-```bash
-uv run .agents/skills/citizen-app/scripts/state.py init --name "$(basename "$PWD")"
-uv run .agents/skills/citizen-app/scripts/state.py set repo_provider github
-uv run .agents/skills/citizen-app/scripts/state.py set repo_visibility private
-uv run .agents/skills/citizen-app/scripts/state.py set repo_url "$(git remote get-url origin)"
-uv run .agents/skills/citizen-app/scripts/state.py set workspace_ready true
+```text
+uv run .agents/skills/citizen-app/scripts/state.py init --name citizen-<slug>
+uv run .agents/skills/citizen-app/scripts/state.py record-workspace --provider github --visibility private
 uv run .agents/skills/citizen-app/scripts/state.py advance
 ```
 
-For a local draft, set provider and visibility to `local` and omit `repo_url`.
+For a local draft, use `record-workspace --provider local`.
 
 Enterprise GitHub and Azure DevOps creation remain blocked until the provider
 contract in `CORPORATE_INTEGRATION.md` is completed. Do not guess internal
 commands or silently substitute a public repository.
+
+Preflight writes capability evidence with `--output .plan/preflight.json`.
+Missing browser capability is informational here: dashboard building can
+continue, but the citizen-visible approval gate will wait until a browser is
+available. A local-only repository is also a supported finish line.

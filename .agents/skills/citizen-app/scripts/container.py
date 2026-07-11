@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import socket
 import subprocess
 import sys
@@ -21,6 +22,7 @@ from typing import Any
 import state as workflow_state
 
 DEFAULT_EVIDENCE = Path(".plan/container/verification.json")
+SKILL_DIR = Path(__file__).resolve().parents[1]
 
 
 def run(command: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
@@ -40,14 +42,47 @@ def free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def prepare_container_files(app_type: str) -> dict[str, str]:
+    sources = {
+        Path("Dockerfile"): SKILL_DIR
+        / "assets/dockerfiles"
+        / ("Dockerfile.ui" if app_type == "ui" else "Dockerfile.job"),
+        Path(".dockerignore"): SKILL_DIR / "assets/dockerfiles/dockerignore",
+    }
+    results: dict[str, str] = {}
+    for destination, source in sources.items():
+        if destination.is_file():
+            if destination.read_bytes() != source.read_bytes():
+                sys.exit(
+                    f"error: {destination} differs from the approved {app_type} starter; "
+                    "review it explicitly before replacement"
+                )
+            results[destination.as_posix()] = "verified"
+        else:
+            shutil.copyfile(source, destination)
+            results[destination.as_posix()] = "created"
+    return results
+
+
 def smoke_job(tag: str) -> tuple[bool, dict[str, Any]]:
-    result = run(["docker", "run", "--rm", tag], capture=True)
+    result = run(["docker", "run", "--rm", tag, "--dry-run"], capture=True)
     return result.returncode == 0 and bool(result.stdout.strip()), {
         "kind": "job",
         "exit_code": result.returncode,
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+
+
+def inspect_image(tag: str, *, attempts: int = 15) -> str | None:
+    for attempt in range(attempts):
+        inspected = run(["docker", "image", "inspect", tag, "--format", "{{.Id}}"], capture=True)
+        image_id = inspected.stdout.strip()
+        if inspected.returncode == 0 and image_id.startswith("sha256:"):
+            return image_id
+        if attempt + 1 < attempts:
+            time.sleep(1)
+    return None
 
 
 def smoke_ui(tag: str) -> tuple[bool, dict[str, Any]]:
@@ -125,22 +160,23 @@ def main() -> int:
     parser.add_argument("--tag", default=f"{Path.cwd().name.lower()}:local")
     parser.add_argument("--evidence", type=Path, default=DEFAULT_EVIDENCE)
     parser.add_argument("--no-record", action="store_true")
+    parser.add_argument("--prepare-only", action="store_true")
     args = parser.parse_args()
 
     state = workflow_state.load()
     if state.get("app_type") not in {"ui", "job"}:
         print("error: application type is missing from workflow state", file=sys.stderr)
         return 1
-    if not Path("Dockerfile").is_file():
-        print("error: Dockerfile is missing", file=sys.stderr)
-        return 1
+    prepared = prepare_container_files(str(state["app_type"]))
+    print(json.dumps({"schema_version": 1, "operation": "prepare", "files": prepared}))
+    if args.prepare_only:
+        return 0
 
     built = run(["docker", "build", "-t", args.tag, "."])
     if built.returncode != 0:
         return built.returncode
-    inspected = run(["docker", "image", "inspect", args.tag, "--format", "{{.Id}}"], capture=True)
-    image_id = inspected.stdout.strip()
-    if inspected.returncode != 0 or not image_id.startswith("sha256:"):
+    image_id = inspect_image(args.tag)
+    if image_id is None:
         print("error: built image could not be inspected", file=sys.stderr)
         return 1
 
@@ -168,6 +204,8 @@ def main() -> int:
             "record-container-verification",
             "--evidence",
             str(args.evidence),
+            "--method",
+            "local",
         ]
     )
     return recorded.returncode

@@ -6,20 +6,12 @@ Jenkins and Kubernetes integration and prove it builds locally.
 Tell the citizen before starting: packaging can take several minutes and they
 can step away while you keep working.
 
-Copy the matching Dockerfile and shared ignore file:
+The helper selects or verifies the matching Dockerfile and ignore file, builds,
+inspects, and runs the type-specific smoke check. Its default tag comes from the
+current folder, so the command is unchanged across Bash and PowerShell:
 
-```bash
-cp .agents/skills/citizen-app/assets/dockerfiles/Dockerfile.ui Dockerfile
-cp .agents/skills/citizen-app/assets/dockerfiles/dockerignore .dockerignore
-```
-
-Use `Dockerfile.job` for an automated job.
-
-Build, inspect, and run the type-specific smoke check:
-
-```bash
-IMAGE_TAG="$(basename "$PWD"):local"
-uv run .agents/skills/citizen-app/scripts/container.py --tag "$IMAGE_TAG"
+```text
+uv run .agents/skills/citizen-app/scripts/container.py
 uv run .agents/skills/citizen-app/scripts/state.py advance
 ```
 

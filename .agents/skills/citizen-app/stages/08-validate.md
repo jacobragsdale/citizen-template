@@ -13,6 +13,11 @@ It runs dependency sync, lint, formatting, types, pytest, and the type-specific
 preview again. Dashboard validation executes the page with Streamlit `AppTest`;
 job validation executes the real dry-run wiring.
 
+The validator writes `.plan/validation/summary.json`, a concise `summary.txt`,
+and one UTF-8 diagnostic log per check. The JSON records exact commands, exit
+codes, durations, application and workflow tests, and current plan/project
+fingerprints. Each retry clears the prior summaries before running.
+
 If anything fails, explain the citizen-visible consequence, rewind to build,
 fix the cause without weakening rules or deleting tests, and repeat build,
 preview, user approval, and validation.

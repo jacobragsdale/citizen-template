@@ -25,7 +25,7 @@ The assistant will:
 4. build the app and show you a working preview;
 5. revise it until you approve the result you can actually see;
 6. run lint, type, test, render, and container checks; and
-7. open a pull request ready for the internal delivery pipeline.
+7. finish as a verified local draft or open a pull request ready for the internal delivery pipeline.
 
 You never need to type git, package, Docker, or pull-request commands. You can
 stop and resume later; the workflow records where it left off.
@@ -47,7 +47,12 @@ Before the workflow opens a pull request, the application has been previewed
 with representative data, approved by the citizen, tested against its success
 criteria, and packaged for the corporate container platform.
 
-The pull request is the deliberate handoff point. It is ready for internal CI,
+For a local-only rehearsal, “finished” means the exact reviewed revision and
+its evidence are preserved as `local-ready`; it does not claim publication or
+deployment. That revision can resume at publication after a repository adapter
+is configured without repeating still-current checks.
+
+The pull request is the deliberate corporate handoff point. It is ready for internal CI,
 security scanning, registry publication, and Kubernetes deployment, but it is
 not described as live until those systems confirm deployment.
 
